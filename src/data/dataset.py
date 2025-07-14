@@ -1,7 +1,7 @@
 """
 PyTorch Dataset and DataModule for ARKit blendshape data.
 
-Unit name     : GaussianFaceDataset
+Unit name     : KoeMorphDataset
 Input         : Directory paths with paired jsonl/wav files
 Output        : Batched tensors {'wav': (B,L), 'arkit': (B,T,52)}  
 Dependencies  : torch, .io module
@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader, Dataset
 from .io import ARKitDataLoader
 
 
-class GaussianFaceDataset(Dataset):
+class KoeMorphDataset(Dataset):
     """PyTorch Dataset for ARKit blendshape and audio data."""
     
     def __init__(
@@ -177,7 +177,7 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     }
 
 
-class GaussianFaceDataModule:
+class KoeMorphDataModule:
     """
     Data module that handles train/val/test splits and DataLoaders.
     
@@ -231,7 +231,7 @@ class GaussianFaceDataModule:
     def setup(self):
         """Setup datasets."""
         # Create training dataset
-        self._train_dataset = GaussianFaceDataset(
+        self._train_dataset = KoeMorphDataset(
             data_dir=self.train_data_dir,
             sample_rate=self.sample_rate,
             target_fps=self.target_fps,
@@ -240,7 +240,7 @@ class GaussianFaceDataModule:
         
         # Create validation dataset if specified
         if self.val_data_dir is not None:
-            self._val_dataset = GaussianFaceDataset(
+            self._val_dataset = KoeMorphDataset(
                 data_dir=self.val_data_dir,
                 sample_rate=self.sample_rate,
                 target_fps=self.target_fps,
@@ -249,7 +249,7 @@ class GaussianFaceDataModule:
         
         # Create test dataset if specified
         if self.test_data_dir is not None:
-            self._test_dataset = GaussianFaceDataset(
+            self._test_dataset = KoeMorphDataset(
                 data_dir=self.test_data_dir,
                 sample_rate=self.sample_rate,
                 target_fps=self.target_fps,

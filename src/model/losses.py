@@ -1,7 +1,7 @@
 """
 Loss functions and metrics for blendshape generation.
 
-Unit name     : GaussianFaceLoss
+Unit name     : KoeMorphLoss
 Input         : pred_blendshapes (B,52), target_blendshapes (B,52)
 Output        : scalar loss + metrics dict
 Dependencies  : torch.nn, librosa (for perceptual metrics)
@@ -25,7 +25,7 @@ except ImportError:
     warnings.warn("librosa not available. Some perceptual metrics will be unavailable.")
 
 
-class GaussianFaceLoss(nn.Module):
+class KoeMorphLoss(nn.Module):
     """
     Combined loss function for blendshape generation.
     

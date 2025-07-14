@@ -3,15 +3,15 @@
 import pytest
 import torch
 
-from src.model.gaussian_face import GaussianFaceModel, create_gaussian_face_model
+from src.model.gaussian_face import KoeMorphModel, create_koemorph_model
 
 
-class TestGaussianFaceModel:
-    """Test complete GaussianFace model."""
+class TestKoeMorphModel:
+    """Test complete KoeMorph model."""
     
     def test_model_creation(self):
         """Test model creation with default parameters."""
-        model = GaussianFaceModel()
+        model = KoeMorphModel()
         
         assert model.mel_dim == 80
         assert model.prosody_dim == 4
@@ -22,7 +22,7 @@ class TestGaussianFaceModel:
     
     def test_model_creation_custom_params(self):
         """Test model creation with custom parameters."""
-        model = GaussianFaceModel(
+        model = KoeMorphModel(
             mel_dim=40,
             prosody_dim=6,
             emotion_dim=128,
@@ -43,7 +43,7 @@ class TestGaussianFaceModel:
     
     def test_model_forward_basic(self):
         """Test basic forward pass."""
-        model = GaussianFaceModel(
+        model = KoeMorphModel(
             mel_dim=40,
             prosody_dim=4,
             emotion_dim=64,
@@ -76,7 +76,7 @@ class TestGaussianFaceModel:
     
     def test_model_forward_with_mask(self):
         """Test forward pass with audio mask."""
-        model = GaussianFaceModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, num_heads=2)
         
         batch_size = 2
         seq_len = 10
@@ -98,7 +98,7 @@ class TestGaussianFaceModel:
     
     def test_model_forward_with_prev_blendshapes(self):
         """Test forward pass with previous blendshapes."""
-        model = GaussianFaceModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, num_heads=2)
         
         batch_size = 1
         seq_len = 8
@@ -121,7 +121,7 @@ class TestGaussianFaceModel:
     
     def test_model_forward_with_attention_return(self):
         """Test forward pass with attention weights return."""
-        model = GaussianFaceModel(
+        model = KoeMorphModel(
             d_model=64, num_heads=2, num_attention_layers=2
         )
         
@@ -146,7 +146,7 @@ class TestGaussianFaceModel:
     
     def test_model_without_smoothing_constraints(self):
         """Test model without smoothing and constraints."""
-        model = GaussianFaceModel(
+        model = KoeMorphModel(
             d_model=64,
             use_temporal_smoothing=False,
             use_constraints=False,
@@ -170,7 +170,7 @@ class TestGaussianFaceModel:
     
     def test_model_inference_step(self):
         """Test single inference step for real-time processing."""
-        model = GaussianFaceModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, num_heads=2)
         
         # Single frame input
         mel_features = torch.randn(1, 1, 80)
@@ -188,7 +188,7 @@ class TestGaussianFaceModel:
     
     def test_model_reset_temporal_state(self):
         """Test temporal state reset."""
-        model = GaussianFaceModel(use_temporal_smoothing=True)
+        model = KoeMorphModel(use_temporal_smoothing=True)
         
         # Process some frames to build up state
         for _ in range(3):
@@ -211,7 +211,7 @@ class TestGaussianFaceModel:
     
     def test_model_gradient_flow(self):
         """Test gradient flow through complete model."""
-        model = GaussianFaceModel(d_model=64, num_heads=2, num_attention_layers=1)
+        model = KoeMorphModel(d_model=64, num_heads=2, num_attention_layers=1)
         
         batch_size = 1
         seq_len = 3
@@ -236,7 +236,7 @@ class TestGaussianFaceModel:
     
     def test_model_num_parameters(self):
         """Test parameter counting."""
-        model = GaussianFaceModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, num_heads=2)
         
         num_params = model.get_num_parameters()
         
@@ -249,7 +249,7 @@ class TestGaussianFaceModel:
     
     def test_model_info(self):
         """Test model info retrieval."""
-        model = GaussianFaceModel(
+        model = KoeMorphModel(
             mel_dim=40,
             d_model=128,
             num_heads=4,
@@ -283,7 +283,7 @@ class TestModelCreation:
             'use_constraints': False,
         }
         
-        model = create_gaussian_face_model(config)
+        model = create_koemorph_model(config)
         
         assert model.mel_dim == 40
         assert model.prosody_dim == 6
@@ -299,7 +299,7 @@ class TestModelCreation:
             'num_heads': 8,
         }
         
-        model = create_gaussian_face_model(config)
+        model = create_koemorph_model(config)
         
         # Should use specified values
         assert model.d_model == 128
@@ -313,7 +313,7 @@ class TestModelCreation:
         """Test model creation with empty configuration (all defaults)."""
         config = {}
         
-        model = create_gaussian_face_model(config)
+        model = create_koemorph_model(config)
         
         # Should use all defaults
         assert model.mel_dim == 80

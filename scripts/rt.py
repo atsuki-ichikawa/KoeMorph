@@ -1,5 +1,5 @@
 """
-Real-time inference script for GaussianFace model.
+Real-time inference script for KoeMorph model.
 
 Captures audio from microphone, processes it in real-time, and outputs
 blendshape coefficients via UDP/OSC or files.
@@ -37,7 +37,7 @@ except ImportError:
 from src.features.emotion2vec import Emotion2VecExtractor
 from src.features.prosody import ProsodyExtractor
 from src.features.stft import MelSpectrogramExtractor
-from src.model.gaussian_face import create_gaussian_face_model
+from src.model.gaussian_face import create_koemorph_model
 
 
 # Setup logging
@@ -300,7 +300,7 @@ class RealTimeInference:
             })
         
         # Create model
-        model = create_gaussian_face_model(config.model)
+        model = create_koemorph_model(config.model)
         model.load_state_dict(checkpoint['model_state_dict'])
         model = model.to(self.device)
         model.eval()
@@ -390,7 +390,7 @@ class RealTimeInference:
 
 def main():
     """Main real-time inference function."""
-    parser = argparse.ArgumentParser(description="Real-time GaussianFace inference")
+    parser = argparse.ArgumentParser(description="Real-time KoeMorph inference")
     
     # Model arguments
     parser.add_argument("--model_path", type=str, required=True,

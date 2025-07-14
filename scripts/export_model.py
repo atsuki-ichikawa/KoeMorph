@@ -1,7 +1,7 @@
 """
 Model export script for deployment optimization.
 
-Exports trained GaussianFace model to various formats for deployment:
+Exports trained KoeMorph model to various formats for deployment:
 - TorchScript for C++ inference
 - ONNX for cross-platform deployment
 - TensorRT for NVIDIA GPU optimization
@@ -16,7 +16,7 @@ import torch
 import torch.onnx
 from omegaconf import OmegaConf
 
-from src.model.gaussian_face import create_gaussian_face_model
+from src.model.gaussian_face import create_koemorph_model
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +33,7 @@ except ImportError:
 
 
 class ModelExporter:
-    """Export trained GaussianFace model to various formats."""
+    """Export trained KoeMorph model to various formats."""
     
     def __init__(self, model_path: str, config_path: Optional[str] = None):
         """
@@ -65,7 +65,7 @@ class ModelExporter:
             raise ValueError("No configuration found. Provide config_path or ensure checkpoint contains config.")
         
         # Create and load model
-        model = create_gaussian_face_model(config.model)
+        model = create_koemorph_model(config.model)
         model.load_state_dict(checkpoint['model_state_dict'])
         model.eval()
         
@@ -92,7 +92,7 @@ class ModelExporter:
         logger.info("Exporting to TorchScript...")
         
         # Create wrapper for inference
-        class GaussianFaceWrapper(torch.nn.Module):
+        class KoeMorphWrapper(torch.nn.Module):
             def __init__(self, model):
                 super().__init__()
                 self.model = model
@@ -108,7 +108,7 @@ class ModelExporter:
                 )
                 return output['blendshapes']
         
-        wrapper = GaussianFaceWrapper(self.model)
+        wrapper = KoeMorphWrapper(self.model)
         wrapper.eval()
         
         # Create dummy inputs
@@ -165,7 +165,7 @@ class ModelExporter:
         logger.info("Exporting to ONNX...")
         
         # Create wrapper for clean ONNX export
-        class GaussianFaceONNXWrapper(torch.nn.Module):
+        class KoeMorphONNXWrapper(torch.nn.Module):
             def __init__(self, model):
                 super().__init__()
                 self.model = model
@@ -182,7 +182,7 @@ class ModelExporter:
                 )
                 return output['blendshapes']
         
-        wrapper = GaussianFaceONNXWrapper(self.model)
+        wrapper = KoeMorphONNXWrapper(self.model)
         wrapper.eval()
         
         # Create dummy inputs
@@ -379,7 +379,7 @@ class ModelExporter:
 
 def main():
     """Main export function."""
-    parser = argparse.ArgumentParser(description="Export GaussianFace model")
+    parser = argparse.ArgumentParser(description="Export KoeMorph model")
     
     # Required arguments
     parser.add_argument("--model_path", type=str, required=True,

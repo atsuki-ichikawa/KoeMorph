@@ -1,7 +1,7 @@
 """
-Main GaussianFace model combining all components.
+Main KoeMorph model combining all components.
 
-Unit name     : GaussianFaceModel
+Unit name     : KoeMorphModel
 Input         : Audio features (mel, prosody, emotion2vec)
 Output        : ARKit 52 blendshapes [0,1]
 Dependencies  : All model components
@@ -24,9 +24,9 @@ from .decoder import BlendshapeDecoder, BlendshapeConstraints, TemporalSmoother
 from .losses import GaussianFaceLoss
 
 
-class GaussianFaceModel(nn.Module):
+class KoeMorphModel(nn.Module):
     """
-    Complete GaussianFace model for real-time blendshape generation.
+    Complete KoeMorph model for real-time blendshape generation.
     
     Combines multi-stream audio encoding, cross-attention, and blendshape
     decoding with temporal smoothing and constraints.
@@ -74,7 +74,7 @@ class GaussianFaceModel(nn.Module):
         dropout: float = 0.1,
     ):
         """
-        Initialize GaussianFace model.
+        Initialize KoeMorph model.
         
         Args:
             mel_dim: Mel-spectrogram feature dimension
@@ -193,7 +193,7 @@ class GaussianFaceModel(nn.Module):
         return_attention: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass of GaussianFace model.
+        Forward pass of KoeMorph model.
         
         Args:
             mel_features: Mel-spectrogram features (B, T, mel_dim)
@@ -333,17 +333,17 @@ class GaussianFaceModel(nn.Module):
         }
 
 
-def create_gaussian_face_model(config: dict) -> GaussianFaceModel:
+def create_koemorph_model(config: dict) -> KoeMorphModel:
     """
-    Create GaussianFace model from configuration.
+    Create KoeMorph model from configuration.
     
     Args:
         config: Model configuration dictionary
         
     Returns:
-        Initialized GaussianFace model
+        Initialized KoeMorph model
     """
-    model = GaussianFaceModel(
+    model = KoeMorphModel(
         # Audio dimensions
         mel_dim=config.get('mel_dim', 80),
         prosody_dim=config.get('prosody_dim', 4),

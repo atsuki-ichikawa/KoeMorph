@@ -1,10 +1,10 @@
-# GaussianFace: Real-Time ARKit Blendshape Generation
+# KoeMorph: Real-Time ARKit Blendshape Generation
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-red.svg)](https://pytorch.org/)
 
-**GaussianFace** is a real-time facial expression generation system that uses ARKit 52 blendshapes as direct queries and multi-stream audio features (log-Mel, prosody, emotion2vec) as keys/values in cross-attention.
+**KoeMorph** (声Morph - Voice Morphing) is a real-time facial expression generation system that uses ARKit 52 blendshapes as direct queries and multi-stream audio features (log-Mel, prosody, emotion2vec) as keys/values in cross-attention.
 
 ## 🎯 Key Features
 
@@ -40,8 +40,8 @@ graph LR
 ### Installation
 
 ```bash
-git clone https://github.com/your-username/gaussian-face.git
-cd gaussian-face
+git clone https://github.com/your-username/KoeMorph.git
+cd KoeMorph
 
 # Install dependencies
 pip install -e .[dev]
@@ -86,7 +86,7 @@ python scripts/export_model.py --model_path checkpoints/best_model.pth --formats
 ## 📁 Project Structure
 
 ```
-gaussian-face/
+KoeMorph/
 ├── src/
 │   ├── data/              # Data loading and preprocessing
 │   │   ├── io.py          # ARKit jsonl + wav loading
@@ -190,14 +190,14 @@ pytest tests/model/test_attention.py -v
 
 ## 📚 Citation
 
-If you use GaussianFace in your research, please cite:
+If you use KoeMorph in your research, please cite:
 
 ```bibtex
-@software{gaussian_face_2024,
-  title={GaussianFace: Real-Time ARKit Blendshape Generation with Multi-Stream Audio Cross-Attention},
-  author={GaussianFace Team},
+@software{koemorph_2024,
+  title={KoeMorph: Real-Time ARKit Blendshape Generation with Multi-Stream Audio Cross-Attention},
+  author={KoeMorph Team},
   year={2024},
-  url={https://github.com/your-username/gaussian-face}
+  url={https://github.com/your-username/KoeMorph}
 }
 ```
 

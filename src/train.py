@@ -1,5 +1,5 @@
 """
-Training script for GaussianFace model.
+Training script for KoeMorph model.
 
 Implements complete training pipeline with Hydra configuration,
 logging, checkpointing, and evaluation.
@@ -20,12 +20,12 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from src.data.dataset import GaussianFaceDataModule
+from src.data.dataset import KoeMorphDataModule
 from src.features.emotion2vec import Emotion2VecExtractor
 from src.features.prosody import ProsodyExtractor
 from src.features.stft import MelSpectrogramExtractor
-from src.model.gaussian_face import create_gaussian_face_model
-from src.model.losses import BlendshapeMetrics, GaussianFaceLoss
+from src.model.gaussian_face import create_koemorph_model
+from src.model.losses import BlendshapeMetrics, KoeMorphLoss
 
 
 # Setup logging
@@ -33,9 +33,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class GaussianFaceTrainer:
+class KoeMorphTrainer:
     """
-    Trainer class for GaussianFace model.
+    Trainer class for KoeMorph model.
     
     Handles training loop, validation, checkpointing, and logging.
     """
@@ -81,8 +81,8 @@ class GaussianFaceTrainer:
         return device
     
     def _setup_model(self) -> nn.Module:
-        """Setup GaussianFace model."""
-        model = create_gaussian_face_model(self.config.model)
+        """Setup KoeMorph model."""
+        model = create_koemorph_model(self.config.model)
         model = model.to(self.device)
         
         # Load checkpoint if specified
@@ -126,7 +126,7 @@ class GaussianFaceTrainer:
     
     def _setup_loss_function(self) -> nn.Module:
         """Setup loss function."""
-        return GaussianFaceLoss(
+        return KoeMorphLoss(
             mse_weight=self.config.training.loss.mse_weight,
             l1_weight=self.config.training.loss.l1_weight,
             perceptual_weight=self.config.training.loss.perceptual_weight,
@@ -165,9 +165,9 @@ class GaussianFaceTrainer:
         else:
             raise ValueError(f"Unsupported scheduler: {scheduler_config._target_}")
     
-    def _setup_data(self) -> GaussianFaceDataModule:
+    def _setup_data(self) -> KoeMorphDataModule:
         """Setup data module."""
-        data_module = GaussianFaceDataModule(
+        data_module = KoeMorphDataModule(
             train_data_dir=self.config.data.train_data_dir,
             val_data_dir=self.config.data.get('val_data_dir'),
             test_data_dir=self.config.data.get('test_data_dir'),
@@ -448,7 +448,7 @@ def main(config: DictConfig):
             torch.cuda.manual_seed(config.seed)
     
     # Create trainer and start training
-    trainer = GaussianFaceTrainer(config)
+    trainer = KoeMorphTrainer(config)
     trainer.train()
 
 

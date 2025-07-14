@@ -3,10 +3,10 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gaussian-face"
+name = "koemorph"
 version = "0.1.0"
-description = "ARKit Blendshape Generation with Multi-Stream Audio Cross-Attention"
-authors = [{name = "Gaussian Face Team"}]
+description = "Real-Time ARKit Blendshape Generation with Multi-Stream Audio Cross-Attention"
+authors = [{name = "KoeMorph Team"}]
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -43,8 +43,8 @@ realtime = [
 ]
 
 [project.scripts]
-gaussian-face-train = "gaussian_face.train:main"
-gaussian-face-rt = "gaussian_face.scripts.rt:main"
+koemorph-train = "src.train:main"
+koemorph-rt = "scripts.rt:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

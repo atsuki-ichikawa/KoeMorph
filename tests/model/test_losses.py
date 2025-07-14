@@ -5,19 +5,19 @@ import torch
 
 from src.model.losses import (
     BlendshapeMetrics,
-    GaussianFaceLoss,
+    KoeMorphLoss,
     LandmarkConsistencyLoss,
     PerceptualBlendshapeLoss,
     compute_lip_sync_metrics,
 )
 
 
-class TestGaussianFaceLoss:
+class TestKoeMorphLoss:
     """Test combined loss function."""
     
     def test_loss_creation(self):
         """Test loss function creation."""
-        loss_fn = GaussianFaceLoss(
+        loss_fn = KoeMorphLoss(
             mse_weight=1.0,
             l1_weight=0.1,
             perceptual_weight=0.5,
@@ -31,7 +31,7 @@ class TestGaussianFaceLoss:
     
     def test_basic_reconstruction_loss(self):
         """Test basic MSE and L1 reconstruction losses."""
-        loss_fn = GaussianFaceLoss(
+        loss_fn = KoeMorphLoss(
             mse_weight=1.0,
             l1_weight=0.1,
             perceptual_weight=0.0,  # Disable other losses
@@ -59,7 +59,7 @@ class TestGaussianFaceLoss:
     
     def test_temporal_loss(self):
         """Test temporal consistency loss."""
-        loss_fn = GaussianFaceLoss(
+        loss_fn = KoeMorphLoss(
             mse_weight=0.0,
             l1_weight=0.0,
             temporal_weight=1.0,
@@ -82,7 +82,7 @@ class TestGaussianFaceLoss:
     
     def test_regularization_losses(self):
         """Test sparsity and smoothness regularization."""
-        loss_fn = GaussianFaceLoss(
+        loss_fn = KoeMorphLoss(
             mse_weight=0.0,
             l1_weight=0.0,
             sparsity_weight=0.1,
@@ -101,7 +101,7 @@ class TestGaussianFaceLoss:
     
     def test_identical_predictions(self):
         """Test loss with identical predictions and targets."""
-        loss_fn = GaussianFaceLoss(
+        loss_fn = KoeMorphLoss(
             mse_weight=1.0,
             l1_weight=1.0,
             perceptual_weight=0.0,
@@ -122,7 +122,7 @@ class TestGaussianFaceLoss:
     
     def test_gradient_flow(self):
         """Test gradient flow through loss function."""
-        loss_fn = GaussianFaceLoss()
+        loss_fn = KoeMorphLoss()
         
         pred_blendshapes = torch.rand(2, 52, requires_grad=True)
         target_blendshapes = torch.rand(2, 52)
@@ -136,7 +136,7 @@ class TestGaussianFaceLoss:
     
     def test_metrics_computation(self):
         """Test additional metrics computation."""
-        loss_fn = GaussianFaceLoss()
+        loss_fn = KoeMorphLoss()
         
         # Create controlled predictions and targets
         pred_blendshapes = torch.zeros(3, 52)
@@ -159,7 +159,7 @@ class TestGaussianFaceLoss:
         reductions = ['mean', 'sum']
         
         for reduction in reductions:
-            loss_fn = GaussianFaceLoss(reduction=reduction)
+            loss_fn = KoeMorphLoss(reduction=reduction)
             
             pred_blendshapes = torch.rand(2, 52)
             target_blendshapes = torch.rand(2, 52)

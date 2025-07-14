@@ -107,8 +107,10 @@ dmypy.json
 outputs/
 .hydra/
 
-# Data directories
-data/
+# Data directories (training data, not source code)
+data/train/
+data/val/
+data/test/
 datasets/
 checkpoints/
 wandb/
