@@ -1,0 +1,49 @@
+# Model configuration
+_target_: src.model.gaussian_face.GaussianFaceModel
+
+# Architecture dimensions
+d_model: 256
+d_query: 128
+d_key: 256
+d_value: 256
+
+# Audio encoder settings
+audio_encoder:
+  # Mel spectrogram
+  mel:
+    n_fft: 512
+    hop_length: 512  # 30 FPS at 16kHz
+    n_mels: 80
+    f_min: 80
+    f_max: 8000
+  
+  # Prosody features  
+  prosody:
+    frame_length: 0.025  # 25ms
+    frame_shift: 0.01    # 10ms
+    
+  # emotion2vec
+  emotion2vec:
+    model_name: "emotion2vec_base"
+    freeze_pretrained: true
+
+# Cross-attention settings
+attention:
+  num_heads: 8
+  num_layers: 4
+  dropout: 0.1
+  causal: true
+  window_size: 30  # frames (~1 second)
+
+# Decoder settings
+decoder:
+  hidden_dim: 128
+  num_layers: 2
+  activation: "gelu"
+  dropout: 0.1
+  output_activation: "sigmoid"  # for [0,1] blendshapes
+
+# Smoothing
+smoothing:
+  enable: true
+  alpha: 0.8  # exponential moving average factor

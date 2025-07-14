@@ -1,0 +1,28 @@
+# Data configuration
+_target_: src.data.dataset.GaussianFaceDataModule
+
+# Dataset paths
+train_data_dir: "data/train"
+val_data_dir: "data/val"
+test_data_dir: "data/test"
+
+# Audio preprocessing
+sample_rate: 16000
+audio_max_length: 10.0  # seconds
+
+# ARKit blendshapes
+num_blendshapes: 52
+target_fps: 30
+
+# DataLoader settings
+batch_size: 16
+num_workers: 4
+pin_memory: true
+
+# Augmentation
+augmentation:
+  enable: true
+  pitch_shift_range: [-2, 2]  # semitones
+  time_stretch_range: [0.8, 1.2]
+  noise_prob: 0.3
+  noise_snr_range: [10, 30]  # dB

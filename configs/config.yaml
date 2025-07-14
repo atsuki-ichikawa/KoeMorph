@@ -1,0 +1,23 @@
+# Main configuration file for Gaussian Face
+defaults:
+  - data: default
+  - model: default
+  - training: default
+  - _self_
+
+# Global settings
+seed: 42
+device: auto  # auto, cpu, cuda
+
+# Logging
+hydra:
+  run:
+    dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true
+
+# Experiment tracking
+experiment:
+  name: "gaussian_face_exp"
+  tags: []
+  notes: ""
