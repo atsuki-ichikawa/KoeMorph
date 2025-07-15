@@ -15,7 +15,7 @@ lr_scheduler:
 
 # Loss function
 loss:
-  _target_: src.model.losses.GaussianFaceLoss
+  _target_: src.model.losses.KoeMorphLoss
   mse_weight: 1.0
   l1_weight: 0.1
   perceptual_weight: 0.5

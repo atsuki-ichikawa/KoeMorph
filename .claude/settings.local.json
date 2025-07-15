@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python3 -m pip install:*)",
+      "Bash(export:*)",
+      "Bash(sudo apt:*)",
+      "Bash(sudo apt install:*)",
+      "Bash(pytest:*)",
+      "Bash(python:*)",
+      "Bash(PYTHONPATH=/home/ichikawa/KoeMorph python3 src/train.py --help)",
+      "Bash(PYTHONPATH=/home/ichikawa/KoeMorph python3 scripts/rt.py --help)",
+      "Bash(mv:*)",
+      "Bash(git config:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

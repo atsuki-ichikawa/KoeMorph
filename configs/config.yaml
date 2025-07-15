@@ -1,4 +1,4 @@
-# Main configuration file for Gaussian Face
+# Main configuration file for KoeMorph
 defaults:
   - data: default
   - model: default
@@ -18,6 +18,6 @@ hydra:
 
 # Experiment tracking
 experiment:
-  name: "gaussian_face_exp"
+  name: "koemorph_exp"
   tags: []
   notes: ""

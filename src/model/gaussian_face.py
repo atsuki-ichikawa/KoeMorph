@@ -21,7 +21,7 @@ from .attention import (
     MultiStreamAudioEncoder,
 )
 from .decoder import BlendshapeDecoder, BlendshapeConstraints, TemporalSmoother
-from .losses import GaussianFaceLoss
+from .losses import KoeMorphLoss
 
 
 class KoeMorphModel(nn.Module):

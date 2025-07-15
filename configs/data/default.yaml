@@ -1,5 +1,5 @@
 # Data configuration
-_target_: src.data.dataset.GaussianFaceDataModule
+_target_: src.data.dataset.KoeMorphDataModule
 
 # Dataset paths
 train_data_dir: "data/train"

@@ -1,4 +1,4 @@
-"""Tests for model.gaussian_face module."""
+"""Tests for KoeMorph model."""
 
 import pytest
 import torch
@@ -76,7 +76,7 @@ class TestKoeMorphModel:
     
     def test_model_forward_with_mask(self):
         """Test forward pass with audio mask."""
-        model = KoeMorphModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, d_query=64, num_heads=2)
         
         batch_size = 2
         seq_len = 10
@@ -98,7 +98,7 @@ class TestKoeMorphModel:
     
     def test_model_forward_with_prev_blendshapes(self):
         """Test forward pass with previous blendshapes."""
-        model = KoeMorphModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, d_query=64, num_heads=2)
         
         batch_size = 1
         seq_len = 8
@@ -122,7 +122,7 @@ class TestKoeMorphModel:
     def test_model_forward_with_attention_return(self):
         """Test forward pass with attention weights return."""
         model = KoeMorphModel(
-            d_model=64, num_heads=2, num_attention_layers=2
+            d_model=64, d_query=64, num_heads=2, num_attention_layers=2
         )
         
         batch_size = 1
@@ -148,6 +148,7 @@ class TestKoeMorphModel:
         """Test model without smoothing and constraints."""
         model = KoeMorphModel(
             d_model=64,
+            d_query=64,
             use_temporal_smoothing=False,
             use_constraints=False,
         )
@@ -170,7 +171,7 @@ class TestKoeMorphModel:
     
     def test_model_inference_step(self):
         """Test single inference step for real-time processing."""
-        model = KoeMorphModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, d_query=64, num_heads=2)
         
         # Single frame input
         mel_features = torch.randn(1, 1, 80)
@@ -211,7 +212,7 @@ class TestKoeMorphModel:
     
     def test_model_gradient_flow(self):
         """Test gradient flow through complete model."""
-        model = KoeMorphModel(d_model=64, num_heads=2, num_attention_layers=1)
+        model = KoeMorphModel(d_model=64, d_query=64, num_heads=2, num_attention_layers=1)
         
         batch_size = 1
         seq_len = 3
@@ -236,7 +237,7 @@ class TestKoeMorphModel:
     
     def test_model_num_parameters(self):
         """Test parameter counting."""
-        model = KoeMorphModel(d_model=64, num_heads=2)
+        model = KoeMorphModel(d_model=64, d_query=64, num_heads=2)
         
         num_params = model.get_num_parameters()
         
