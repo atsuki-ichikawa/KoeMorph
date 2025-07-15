@@ -12,7 +12,9 @@
       "Bash(PYTHONPATH=/home/ichikawa/KoeMorph python3 scripts/rt.py --help)",
       "Bash(mv:*)",
       "Bash(git config:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(gh auth:*)",
+      "Bash(git push:*)"
     ],
     "deny": []
   }
