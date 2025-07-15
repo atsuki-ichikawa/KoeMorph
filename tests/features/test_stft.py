@@ -4,9 +4,12 @@ import numpy as np
 import pytest
 import torch
 
-from src.features.stft import (InverseMelSpectrogram, MelSpectrogramExtractor,
-                               compute_reconstruction_snr,
-                               validate_mel_parameters)
+from src.features.stft import (
+    InverseMelSpectrogram,
+    MelSpectrogramExtractor,
+    compute_reconstruction_snr,
+    validate_mel_parameters,
+)
 
 
 class TestMelSpectrogramExtractor:

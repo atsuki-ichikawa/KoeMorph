@@ -6,9 +6,13 @@ import numpy as np
 import pytest
 import torch
 
-from src.features.emotion2vec import (DummyWav2Vec2Model, Emotion2VecCache,
-                                      Emotion2VecExtractor, compute_audio_hash,
-                                      validate_emotion2vec_features)
+from src.features.emotion2vec import (
+    DummyWav2Vec2Model,
+    Emotion2VecCache,
+    Emotion2VecExtractor,
+    compute_audio_hash,
+    validate_emotion2vec_features,
+)
 
 
 class TestEmotion2VecExtractor:

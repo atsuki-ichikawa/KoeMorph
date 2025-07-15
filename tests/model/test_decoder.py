@@ -3,8 +3,12 @@
 import pytest
 import torch
 
-from src.model.decoder import (BlendshapeConstraints, BlendshapeDecoder,
-                               TemporalSmoother, validate_blendshape_output)
+from src.model.decoder import (
+    BlendshapeConstraints,
+    BlendshapeDecoder,
+    TemporalSmoother,
+    validate_blendshape_output,
+)
 
 
 class TestBlendshapeDecoder:

@@ -15,8 +15,11 @@ from typing import Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from .attention import (BlendshapeQueryEmbedding, MultiHeadCrossAttention,
-                        MultiStreamAudioEncoder)
+from .attention import (
+    BlendshapeQueryEmbedding,
+    MultiHeadCrossAttention,
+    MultiStreamAudioEncoder,
+)
 from .decoder import BlendshapeConstraints, BlendshapeDecoder, TemporalSmoother
 from .losses import KoeMorphLoss
 

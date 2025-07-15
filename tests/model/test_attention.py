@@ -3,10 +3,13 @@
 import pytest
 import torch
 
-from src.model.attention import (BlendshapeQueryEmbedding,
-                                 MultiHeadCrossAttention,
-                                 MultiStreamAudioEncoder, PositionalEncoding,
-                                 create_attention_mask)
+from src.model.attention import (
+    BlendshapeQueryEmbedding,
+    MultiHeadCrossAttention,
+    MultiStreamAudioEncoder,
+    PositionalEncoding,
+    create_attention_mask,
+)
 
 
 class TestMultiHeadCrossAttention:

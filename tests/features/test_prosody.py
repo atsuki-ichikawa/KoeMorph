@@ -4,8 +4,11 @@ import numpy as np
 import pytest
 import torch
 
-from src.features.prosody import (ProsodyExtractor, ProsodyNormalizer,
-                                  validate_prosody_features)
+from src.features.prosody import (
+    ProsodyExtractor,
+    ProsodyNormalizer,
+    validate_prosody_features,
+)
 
 
 class TestProsodyExtractor:

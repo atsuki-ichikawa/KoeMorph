@@ -3,10 +3,13 @@
 import pytest
 import torch
 
-from src.model.losses import (BlendshapeMetrics, KoeMorphLoss,
-                              LandmarkConsistencyLoss,
-                              PerceptualBlendshapeLoss,
-                              compute_lip_sync_metrics)
+from src.model.losses import (
+    BlendshapeMetrics,
+    KoeMorphLoss,
+    LandmarkConsistencyLoss,
+    PerceptualBlendshapeLoss,
+    compute_lip_sync_metrics,
+)
 
 
 class TestKoeMorphLoss:
