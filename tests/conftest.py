@@ -1,9 +1,10 @@
 """Pytest configuration and shared fixtures."""
 
+from pathlib import Path
+
+import numpy as np
 import pytest
 import torch
-import numpy as np
-from pathlib import Path
 
 
 @pytest.fixture
