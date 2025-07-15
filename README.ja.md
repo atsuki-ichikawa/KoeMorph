@@ -42,7 +42,7 @@ graph LR
 ### インストール
 
 ```bash
-git clone https://github.com/your-username/KoeMorph.git
+git clone https://github.com/atsuki-ichikawa/KoeMorph.git
 cd KoeMorph
 
 # 依存関係のインストール
