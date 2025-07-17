@@ -2,9 +2,9 @@
 _target_: src.data.dataset.KoeMorphDataModule
 
 # Dataset paths
-train_data_dir: "data/train"
-val_data_dir: "data/val"
-test_data_dir: "data/test"
+train_data_dir: "/home/ichikawa/KoeMorph/output/organized/train"
+val_data_dir: "/home/ichikawa/KoeMorph/output/organized/val"
+test_data_dir: "/home/ichikawa/KoeMorph/output/organized/test"
 
 # Audio preprocessing
 sample_rate: 16000

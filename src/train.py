@@ -21,10 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from src.data.dataset import KoeMorphDataModule
-from src.features.emotion2vec import Emotion2VecExtractor
-from src.features.prosody import ProsodyExtractor
-from src.features.stft import MelSpectrogramExtractor
-from src.model.gaussian_face import create_koemorph_model
+from src.model.simplified_model import SimplifiedKoeMorphModel
 from src.model.losses import BlendshapeMetrics, KoeMorphLoss
 
 # Setup logging
@@ -46,9 +43,9 @@ class KoeMorphTrainer:
 
         # Initialize model and components
         self.model = self._setup_model()
-        self.feature_extractors = self._setup_feature_extractors()
         self.loss_fn = self._setup_loss_function()
-        self.loss_fn.to(self.device)  # Move loss function to device
+        if hasattr(self.loss_fn, 'to'):
+            self.loss_fn.to(self.device)  # Move loss function to device
         self.optimizer = self._setup_optimizer()
         self.scheduler = self._setup_scheduler()
 
@@ -83,8 +80,20 @@ class KoeMorphTrainer:
         return device
 
     def _setup_model(self) -> nn.Module:
-        """Setup KoeMorph model."""
-        model = create_koemorph_model(self.config.model)
+        """Setup simplified KoeMorph model."""
+        model = SimplifiedKoeMorphModel(
+            d_model=self.config.model.get("d_model", 256),
+            d_query=self.config.model.get("d_query", 256),
+            d_key=self.config.model.get("d_key", 256),
+            d_value=self.config.model.get("d_value", 256),
+            audio_encoder=self.config.model.get("audio_encoder", {}),
+            attention=self.config.model.get("attention", {}),
+            decoder=self.config.model.get("decoder", {}),
+            smoothing=self.config.model.get("smoothing", {}),
+            num_blendshapes=self.config.data.get("num_blendshapes", 52),
+            sample_rate=self.config.data.get("sample_rate", 16000),
+            target_fps=self.config.data.get("target_fps", 30),
+        )
         model = model.to(self.device)
 
         # Load checkpoint if specified
@@ -93,38 +102,6 @@ class KoeMorphTrainer:
 
         return model
 
-    def _setup_feature_extractors(self) -> Dict[str, nn.Module]:
-        """Setup feature extraction modules."""
-        extractors = {}
-
-        # Mel-spectrogram extractor
-        extractors["mel"] = MelSpectrogramExtractor(
-            sample_rate=self.config.data.sample_rate,
-            target_fps=self.config.data.target_fps,
-            n_fft=self.config.model.audio_encoder.mel.n_fft,
-            n_mels=self.config.model.audio_encoder.mel.n_mels,
-            f_min=self.config.model.audio_encoder.mel.f_min,
-            f_max=self.config.model.audio_encoder.mel.f_max,
-        ).to(self.device)
-
-        # Prosody extractor
-        extractors["prosody"] = ProsodyExtractor(
-            sample_rate=self.config.data.sample_rate,
-            target_fps=self.config.data.target_fps,
-            frame_length=self.config.model.audio_encoder.prosody.frame_length,
-            frame_shift=self.config.model.audio_encoder.prosody.frame_shift,
-        ).to(self.device)
-
-        # Emotion2vec extractor
-        extractors["emotion2vec"] = Emotion2VecExtractor(
-            model_name=self.config.model.audio_encoder.emotion2vec.model_name,
-            target_fps=self.config.data.target_fps,
-            sample_rate=self.config.data.sample_rate,
-            freeze_pretrained=self.config.model.audio_encoder.emotion2vec.freeze_pretrained,
-            output_dim=self.config.model.get("emotion_dim", 256),
-        ).to(self.device)
-
-        return extractors
 
     def _setup_loss_function(self) -> nn.Module:
         """Setup loss function."""
@@ -184,28 +161,6 @@ class KoeMorphTrainer:
         data_module.setup()
         return data_module
 
-    def _extract_features(
-        self, batch: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
-        """Extract multi-stream features from audio."""
-        audio = batch["wav"].to(self.device)  # (B, L)
-
-        # Extract features
-        with torch.no_grad():
-            mel_features = self.feature_extractors["mel"](audio)
-            prosody_features = self.feature_extractors["prosody"](audio)
-            emotion_features = self.feature_extractors["emotion2vec"](audio)
-
-        # Create audio mask based on mel features length (all features should have same length)
-        batch_size, seq_len = mel_features.shape[:2]
-        audio_mask = torch.ones(batch_size, seq_len, dtype=torch.bool, device=self.device)
-
-        return {
-            "mel": mel_features,
-            "prosody": prosody_features,
-            "emotion": emotion_features,
-            "audio_mask": audio_mask,
-        }
 
     def train_epoch(self) -> Dict[str, float]:
         """Train for one epoch."""
@@ -226,24 +181,23 @@ class KoeMorphTrainer:
             if target_blendshapes.dim() == 3:
                 target_blendshapes = target_blendshapes[:, 0, :]  # (B, 52)
 
-            # Extract features
-            features = self._extract_features(batch)
+            # Get audio input
+            audio = batch["wav"].to(self.device)  # (B, T)
 
             # Forward pass
             self.optimizer.zero_grad()
 
-            output = self.model(
-                mel_features=features["mel"],
-                prosody_features=features["prosody"],
-                emotion_features=features["emotion"],
-                audio_mask=features["audio_mask"],
-                prev_blendshapes=None,  # Could use previous predictions
-            )
-
-            pred_blendshapes = output["blendshapes"]
+            pred_blendshapes = self.model(audio)  # (B, 52)
 
             # Compute loss
-            loss, loss_metrics = self.loss_fn(pred_blendshapes, target_blendshapes)
+            if hasattr(self.loss_fn, 'forward'):
+                loss = self.loss_fn(pred_blendshapes, target_blendshapes)
+                if isinstance(loss, tuple):
+                    loss = loss[0]
+                loss_metrics = {"mse": loss.item()}
+            else:
+                loss = self.loss_fn(pred_blendshapes, target_blendshapes)
+                loss_metrics = {"mse": loss.item()}
 
             # Backward pass
             loss.backward()
@@ -270,7 +224,7 @@ class KoeMorphTrainer:
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
             # Log to tensorboard
-            if self.global_step % self.config.training.log_every_n_steps == 0:
+            if self.global_step % self.config.training.get("log_every_n_steps", 50) == 0:
                 self.writer.add_scalar("train/loss", loss.item(), self.global_step)
                 for key, value in loss_metrics.items():
                     self.writer.add_scalar(f"train/{key}", value, self.global_step)
@@ -316,22 +270,16 @@ class KoeMorphTrainer:
                 if target_blendshapes.dim() == 3:
                     target_blendshapes = target_blendshapes[:, 0, :]
 
-                # Extract features
-                features = self._extract_features(batch)
+                # Get audio input
+                audio = batch["wav"].to(self.device)
 
                 # Forward pass
-                output = self.model(
-                    mel_features=features["mel"],
-                    prosody_features=features["prosody"],
-                    emotion_features=features["emotion"],
-                    audio_mask=features["audio_mask"],
-                    prev_blendshapes=None,
-                )
-
-                pred_blendshapes = output["blendshapes"]
+                pred_blendshapes = self.model(audio)
 
                 # Compute loss
-                loss, _ = self.loss_fn(pred_blendshapes, target_blendshapes)
+                loss = self.loss_fn(pred_blendshapes, target_blendshapes)
+                if isinstance(loss, tuple):
+                    loss = loss[0]
                 val_losses.append(loss.item())
 
                 # Update metrics

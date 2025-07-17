@@ -238,7 +238,10 @@ class MultiHeadCrossAttention(nn.Module):
             start = max(0, key_pos - window_size // 2)
             end = min(k_len, key_pos + window_size // 2 + 1)
 
-            mask[i, start:end] = False  # False means allowed
+            # Use indexing to create new tensor instead of in-place operation
+            row_mask = torch.ones(k_len, device=device, dtype=torch.bool)
+            row_mask[start:end] = False
+            mask[i] = row_mask
 
         return mask
 
