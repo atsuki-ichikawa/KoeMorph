@@ -157,7 +157,15 @@ class ProsodyExtractor(nn.Module):
             [f0_resampled, energy_resampled, vad_resampled, voiced_resampled], axis=1
         )
 
-        return torch.from_numpy(features.astype(np.float32))
+        # Get device from buffers or parameters
+        try:
+            device = next(self.parameters()).device
+        except StopIteration:
+            try:
+                device = next(self.buffers()).device
+            except StopIteration:
+                device = torch.device('cpu')  # fallback
+        return torch.from_numpy(features.astype(np.float32)).to(device)
 
     def _extract_log_energy(self, audio: np.ndarray) -> np.ndarray:
         """Extract log energy from audio signal."""

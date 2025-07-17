@@ -100,27 +100,27 @@ class KoeMorphTrainer:
         extractors["mel"] = MelSpectrogramExtractor(
             sample_rate=self.config.data.sample_rate,
             target_fps=self.config.data.target_fps,
-            n_fft=self.config.model.mel.n_fft,
-            n_mels=self.config.model.mel.n_mels,
-            f_min=self.config.model.mel.f_min,
-            f_max=self.config.model.mel.f_max,
+            n_fft=self.config.model.audio_encoder.mel.n_fft,
+            n_mels=self.config.model.audio_encoder.mel.n_mels,
+            f_min=self.config.model.audio_encoder.mel.f_min,
+            f_max=self.config.model.audio_encoder.mel.f_max,
         ).to(self.device)
 
         # Prosody extractor
         extractors["prosody"] = ProsodyExtractor(
             sample_rate=self.config.data.sample_rate,
             target_fps=self.config.data.target_fps,
-            frame_length=self.config.model.prosody.frame_length,
-            frame_shift=self.config.model.prosody.frame_shift,
+            frame_length=self.config.model.audio_encoder.prosody.frame_length,
+            frame_shift=self.config.model.audio_encoder.prosody.frame_shift,
         ).to(self.device)
 
         # Emotion2vec extractor
         extractors["emotion2vec"] = Emotion2VecExtractor(
-            model_name=self.config.model.emotion2vec.model_name,
+            model_name=self.config.model.audio_encoder.emotion2vec.model_name,
             target_fps=self.config.data.target_fps,
             sample_rate=self.config.data.sample_rate,
-            freeze_pretrained=self.config.model.emotion2vec.freeze_pretrained,
-            output_dim=self.config.model.emotion_dim,
+            freeze_pretrained=self.config.model.audio_encoder.emotion2vec.freeze_pretrained,
+            output_dim=self.config.model.get("emotion_dim", 256),
         ).to(self.device)
 
         return extractors

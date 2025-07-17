@@ -27,7 +27,7 @@ class ARKitDataLoader:
         self,
         sample_rate: int = 16000,
         target_fps: float = 30.0,
-        max_time_drift: float = 0.1,
+        max_time_drift: float = 1.0,
     ):
         """
         Initialize the ARKit data loader.

@@ -124,6 +124,20 @@ class MelSpectrogramExtractor(nn.Module):
 
         # Transpose to (B, T, n_mels) for sequence modeling
         log_mel = log_mel.transpose(1, 2)
+        
+        # Ensure consistent sequence length with other feature extractors
+        # Calculate expected length based on target FPS
+        expected_frames = int(waveform.shape[1] / self.sample_rate * self.target_fps)
+        
+        # Truncate or pad to match expected length
+        current_frames = log_mel.shape[1]
+        if current_frames > expected_frames:
+            log_mel = log_mel[:, :expected_frames, :]
+        elif current_frames < expected_frames:
+            # Pad with the last frame
+            last_frame = log_mel[:, -1:, :]
+            padding = last_frame.repeat(1, expected_frames - current_frames, 1)
+            log_mel = torch.cat([log_mel, padding], dim=1)
 
         return log_mel
 
