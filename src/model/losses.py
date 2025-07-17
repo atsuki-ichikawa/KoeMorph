@@ -327,18 +327,22 @@ class PerceptualBlendshapeLoss(nn.Module):
         # Group-wise losses with different weights
         group_weights = {"mouth": 2.0, "eye": 1.0, "brow": 1.0, "jaw": 1.5}
 
+        group_losses = []
         for group_name, indices in self.groups.items():
             pred_group = pred_blendshapes[:, indices]
             target_group = target_blendshapes[:, indices]
 
             # Weighted MSE for this group
             group_loss = F.mse_loss(pred_group, target_group)
-            total_loss += group_weights[group_name] * group_loss
+            group_losses.append(group_weights[group_name] * group_loss)
+
+        # Sum all group losses (avoiding in-place operations)
+        total_loss = sum(group_losses)
 
         # Audio-visual consistency loss (if audio features available)
         if audio_features is not None:
             av_loss = self._compute_audiovisual_loss(pred_blendshapes, audio_features)
-            total_loss += 0.5 * av_loss
+            total_loss = total_loss + 0.5 * av_loss
 
         return total_loss
 

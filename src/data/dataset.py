@@ -62,6 +62,8 @@ class KoeMorphDataset(Dataset):
 
         # Find all jsonl files
         jsonl_files = list(self.data_dir.glob(pattern))
+        print(f"DEBUG: Looking for pattern '{pattern}' in {self.data_dir}")
+        print(f"DEBUG: Found {len(jsonl_files)} JSONL files: {[f.name for f in jsonl_files]}")
 
         for jsonl_path in jsonl_files:
             # Look for corresponding wav file

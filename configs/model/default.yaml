@@ -3,7 +3,7 @@ _target_: src.model.gaussian_face.KoeMorphModel
 
 # Architecture dimensions
 d_model: 256
-d_query: 128
+d_query: 256
 d_key: 256
 d_value: 256
 
@@ -26,6 +26,7 @@ audio_encoder:
   emotion2vec:
     model_name: "emotion2vec_base"
     freeze_pretrained: true
+    output_dim: 768  # emotion2vec_base output dimension
 
 # Cross-attention settings
 attention:
@@ -34,6 +35,7 @@ attention:
   dropout: 0.1
   causal: true
   window_size: 30  # frames (~1 second)
+  emotion_dim: 256  # emotion2vec actual output dimension
 
 # Decoder settings
 decoder:

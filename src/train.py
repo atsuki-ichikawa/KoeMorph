@@ -48,6 +48,7 @@ class KoeMorphTrainer:
         self.model = self._setup_model()
         self.feature_extractors = self._setup_feature_extractors()
         self.loss_fn = self._setup_loss_function()
+        self.loss_fn.to(self.device)  # Move loss function to device
         self.optimizer = self._setup_optimizer()
         self.scheduler = self._setup_scheduler()
 
@@ -195,11 +196,15 @@ class KoeMorphTrainer:
             prosody_features = self.feature_extractors["prosody"](audio)
             emotion_features = self.feature_extractors["emotion2vec"](audio)
 
+        # Create audio mask based on mel features length (all features should have same length)
+        batch_size, seq_len = mel_features.shape[:2]
+        audio_mask = torch.ones(batch_size, seq_len, dtype=torch.bool, device=self.device)
+
         return {
             "mel": mel_features,
             "prosody": prosody_features,
             "emotion": emotion_features,
-            "audio_mask": batch.get("audio_mask"),
+            "audio_mask": audio_mask,
         }
 
     def train_epoch(self) -> Dict[str, float]:
