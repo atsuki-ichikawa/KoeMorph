@@ -130,3 +130,16 @@ Thumbs.db
 *.ckpt
 *.onnx
 *.trt
+
+# Archive directory (contains old/unnecessary files)
+archive/
+
+# Temporary debug and test files
+*.tmp
+*.temp
+debug_*.py
+*_test.jsonl
+*_debug.jsonl
+
+# But keep important test scripts
+!scripts/test_*.py
