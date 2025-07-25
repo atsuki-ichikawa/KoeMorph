@@ -134,6 +134,10 @@ Thumbs.db
 # Archive directory (contains old/unnecessary files)
 archive/
 
+# Output directories
+output/
+takes/
+
 # Temporary debug and test files
 *.tmp
 *.temp
