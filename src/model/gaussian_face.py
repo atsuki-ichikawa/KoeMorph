@@ -36,7 +36,6 @@ class KoeMorphModel(nn.Module):
         self,
         # Audio encoder settings
         mel_dim: int = 80,
-        prosody_dim: int = 4,
         emotion_dim: int = 256,
         # Model architecture
         d_model: int = 256,
@@ -97,23 +96,20 @@ class KoeMorphModel(nn.Module):
         super().__init__()
 
         self.mel_dim = mel_dim
-        self.prosody_dim = prosody_dim
         self.emotion_dim = emotion_dim
         self.d_model = d_model
         self.num_blendshapes = num_blendshapes
         self.use_temporal_smoothing = use_temporal_smoothing
         self.use_constraints = use_constraints
 
-        # Multi-stream audio encoder
-        self.audio_encoder = MultiStreamAudioEncoder(
+        # Dual-stream audio encoder (without prosody)
+        from .dual_stream_attention import DualStreamEncoder
+        self.audio_encoder = DualStreamEncoder(
             mel_dim=mel_dim,
-            prosody_dim=prosody_dim,
             emotion_dim=emotion_dim,
             d_model=d_model,
             num_layers=num_encoder_layers,
             dropout=dropout,
-            fusion_method="concat",
-            use_positional_encoding=True,
         )
 
         # Blendshape query embeddings
@@ -179,7 +175,6 @@ class KoeMorphModel(nn.Module):
     def forward(
         self,
         mel_features: torch.Tensor,
-        prosody_features: torch.Tensor,
         emotion_features: torch.Tensor,
         audio_mask: Optional[torch.Tensor] = None,
         prev_blendshapes: Optional[torch.Tensor] = None,
@@ -188,11 +183,10 @@ class KoeMorphModel(nn.Module):
         return_attention: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass of KoeMorph model.
+        Forward pass of KoeMorph model (without prosody features).
 
         Args:
             mel_features: Mel-spectrogram features (B, T, mel_dim)
-            prosody_features: Prosody features (B, T, prosody_dim)
             emotion_features: Emotion2vec features (B, T, emotion_dim)
             audio_mask: Audio padding mask (B, T)
             prev_blendshapes: Previous blendshape state (B, 52)
@@ -209,10 +203,14 @@ class KoeMorphModel(nn.Module):
         batch_size = mel_features.shape[0]
         device = mel_features.device
 
-        # Encode multi-stream audio features
-        encoded_audio = self.audio_encoder(
-            mel_features, prosody_features, emotion_features, mask=audio_mask
-        )  # (B, T, d_model)
+        # Encode dual-stream audio features
+        mel_encoded, emotion_encoded = self.audio_encoder(
+            mel_features, emotion_features, mel_mask=audio_mask, emotion_mask=audio_mask
+        )  # Both (B, T, d_model)
+        
+        # For compatibility with existing cross-attention, we'll use a simple fusion
+        # TODO: Replace with proper dual-stream cross-attention
+        encoded_audio = (mel_encoded + emotion_encoded) / 2  # Simple averaging
 
         # Generate query embeddings for blendshapes
         query_embeddings = self.query_embeddings(
@@ -280,7 +278,6 @@ class KoeMorphModel(nn.Module):
     def inference_step(
         self,
         mel_features: torch.Tensor,
-        prosody_features: torch.Tensor,
         emotion_features: torch.Tensor,
         prev_blendshapes: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
@@ -289,7 +286,6 @@ class KoeMorphModel(nn.Module):
 
         Args:
             mel_features: Mel features for current frame (1, 1, mel_dim)
-            prosody_features: Prosody features for current frame (1, 1, prosody_dim)
             emotion_features: Emotion features for current frame (1, 1, emotion_dim)
             prev_blendshapes: Previous blendshape state (1, 52)
 
@@ -299,7 +295,6 @@ class KoeMorphModel(nn.Module):
         with torch.no_grad():
             output = self.forward(
                 mel_features,
-                prosody_features,
                 emotion_features,
                 prev_blendshapes=prev_blendshapes,
                 apply_smoothing=True,
@@ -318,7 +313,6 @@ class KoeMorphModel(nn.Module):
         return {
             "total_parameters": self.get_num_parameters(),
             "mel_dim": self.mel_dim,
-            "prosody_dim": self.prosody_dim,
             "emotion_dim": self.emotion_dim,
             "d_model": self.d_model,
             "num_blendshapes": self.num_blendshapes,
@@ -341,7 +335,6 @@ def create_koemorph_model(config: dict) -> KoeMorphModel:
     model = KoeMorphModel(
         # Audio dimensions
         mel_dim=config.get("mel_dim", 80),
-        prosody_dim=config.get("prosody_dim", 4),
         emotion_dim=config.get("emotion_dim", 256),
         # Architecture
         d_model=config.get("d_model", 256),

@@ -1,0 +1,39 @@
+# Main configuration file for KoeMorph Dual-Stream architecture
+defaults:
+  - data: default
+  - model: dual_stream
+  - training: default
+  - _self_
+
+# Global settings
+seed: 42
+device: auto  # auto, cpu, cuda
+
+# Logging
+hydra:
+  run:
+    dir: outputs/dual_stream/${now:%Y-%m-%d}/${now:%H-%M-%S}
+  job:
+    chdir: true
+
+# Experiment tracking
+experiment:
+  name: "koemorph_dual_stream"
+  tags: ["dual-stream", "mel-emotion-separation"]
+  notes: "Dual-stream architecture with frequency-axis mel processing"
+
+# Override settings for dual-stream experiments
+debug: false
+fast_dev_run: false
+
+# Data processing adjustments for dual-stream
+data:
+  # Ensure consistent frame rates
+  target_fps: 30
+  audio_length: 8.533  # 256 frames at 30 FPS
+  
+  # Enable both mel and emotion features
+  features:
+    mel: true
+    emotion2vec: true
+    prosody: false  # Removed in dual-stream architecture

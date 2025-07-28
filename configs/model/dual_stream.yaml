@@ -1,0 +1,100 @@
+# Dual-stream model configuration
+_target_: src.model.simplified_dual_stream_model.SimplifiedDualStreamModel
+
+# Architecture dimensions
+d_model: 256
+num_heads: 8
+num_blendshapes: 52
+
+# Audio processing
+sample_rate: 16000
+target_fps: 30
+mel_sequence_length: 256  # Fixed sequence length for frequency-axis processing
+
+# Mel-spectrogram settings
+mel:
+  n_fft: 1024
+  hop_length: 533  # 16000/30 for 30 FPS
+  n_mels: 80
+  f_min: 80
+  f_max: 8000
+
+# Long-term context feature extraction configuration
+emotion_config:
+  backend: "opensmile"  # Options: emotion2vec, opensmile, basic
+  # OpenSMILE eGeMAPS settings (recommended)
+  context_window: 20.0    # 20s context (vs mel's 8.5s)
+  update_interval: 0.3    # 300ms updates (real-time)
+  feature_set: "eGeMAPSv02"  # eGeMAPSv02, GeMAPS
+  feature_level: "Functionals"  # Functionals, LowLevelDescriptors
+  device: "cpu"  # OpenSMILE is CPU-only
+  cache_dir: null  # Will use default if null
+  enable_caching: true
+  batch_size: 4
+  sample_rate: 16000
+  
+  # Fallback to emotion2vec if needed
+  emotion2vec_model: "iic/emotion2vec_plus_large"
+
+# Dual-stream attention settings
+dual_stream_attention:
+  num_mel_channels: 80
+  emotion_dim: 88    # eGeMAPS standard (auto-determined at runtime)
+  use_learnable_weights: true
+  temperature: 1.0
+  dropout: 0.1
+  # Removed fixed specialization - let learning discover natural patterns
+
+# Temporal smoothing
+temporal_smoothing:
+  enable: true
+  initial_alpha: 0.8  # Will be learned as parameter
+
+# Model variants for different use cases
+variants:
+  # High-performance variant with shorter context (faster)
+  fast:
+    emotion_config:
+      context_window: 10.0   # Shorter context
+      update_interval: 0.5   # Less frequent updates
+      feature_set: "GeMAPS"  # Smaller feature set
+    d_model: 128
+    num_heads: 4
+    mel_sequence_length: 128
+  
+  # Basic variant (fastest, basic prosodic features)
+  basic:
+    emotion_config:
+      backend: "basic"
+      enable_caching: false
+    dual_stream_attention:
+      emotion_dim: 9  # Basic prosodic features
+    d_model: 128
+    num_heads: 4
+  
+  # Long-context variant for maximum context understanding
+  long_context:
+    emotion_config:
+      context_window: 30.0   # 30s context window
+      update_interval: 0.2   # More frequent updates
+      feature_set: "eGeMAPSv02"
+    d_model: 512
+    num_heads: 16
+    mel_sequence_length: 512
+    
+  # Emotion2vec fallback (if OpenSMILE fails)
+  emotion2vec_fallback:
+    emotion_config:
+      backend: "emotion2vec"
+      model_name: "iic/emotion2vec_plus_large"
+      device: "auto"
+      batch_size: 2  # Smaller batch due to memory requirements
+    dual_stream_attention:
+      emotion_dim: 1024
+
+# Monitoring configuration
+monitoring:
+  enable: true
+  log_dir: "logs/emotion_monitor"
+  enable_plotting: true
+  verbose: false  # Set to true for detailed logs
