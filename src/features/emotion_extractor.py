@@ -178,14 +178,19 @@ class EmotionExtractor:
         try:
             from .opensmile_extractor import OpenSMILEeGeMAPSExtractor
             
-            # Create advanced OpenSMILE extractor with sliding window
+            # Get OpenSMILE config from parent model if available
+            opensmile_config = getattr(self, '_opensmile_config', {})
+            
+            # Create advanced OpenSMILE extractor with sliding window and config
             self.opensmile_extractor = OpenSMILEeGeMAPSExtractor(
                 sample_rate=self.sample_rate,
-                context_window=20.0,  # 20s context (longer than mel's 8.5s)
-                update_interval=0.3,  # 300ms updates (real-time)
-                feature_set="eGeMAPSv02",
-                feature_level="Functionals",
+                context_window=opensmile_config.get("context_window", 20.0),
+                update_interval=opensmile_config.get("update_interval", 0.3),
+                feature_set=opensmile_config.get("feature_set", "eGeMAPSv02"),
+                feature_level=opensmile_config.get("feature_level", "Functionals"),
                 enable_caching=self.enable_caching,
+                temporal_history_frames=opensmile_config.get("temporal_history_frames", 30),
+                use_concatenation=opensmile_config.get("use_concatenation", False),
             )
             
             logger.info("OpenSMILE eGeMAPS sliding window extractor initialized successfully")
@@ -268,6 +273,10 @@ class EmotionExtractor:
         }
         
         # Process each sample in batch
+        batch_embeddings = []
+        batch_predictions = []
+        batch_blendshapes = []
+        
         for i in range(batch_size):
             sample_audio = audio[i]
             
@@ -276,9 +285,9 @@ class EmotionExtractor:
                 cached_result = self._load_from_cache(sample_audio)
                 if cached_result is not None:
                     self.extraction_stats["cache_hits"] += 1
-                    results["embeddings"].append(cached_result["embeddings"])
-                    results["predictions"].append(cached_result["predictions"])
-                    results["blendshape_weights"].append(cached_result["blendshape_weights"])
+                    batch_embeddings.append(cached_result["embeddings"])
+                    batch_predictions.append(cached_result["predictions"])
+                    batch_blendshapes.append(cached_result["blendshape_weights"])
                     results["metadata"]["cache_used"] = True
                     continue
             
@@ -296,9 +305,30 @@ class EmotionExtractor:
             
             # Append to batch results
             if sample_result is not None:
-                results["embeddings"].append(sample_result["embeddings"])
-                results["predictions"].append(sample_result["predictions"])
-                results["blendshape_weights"].append(sample_result["blendshape_weights"])
+                batch_embeddings.append(sample_result["embeddings"])
+                batch_predictions.append(sample_result["predictions"])
+                batch_blendshapes.append(sample_result["blendshape_weights"])
+            else:
+                # Add dummy values for failed extractions to maintain batch consistency
+                if batch_embeddings:  # If we have successful extractions as reference
+                    dummy_shape = batch_embeddings[0].shape
+                    batch_embeddings.append(np.zeros(dummy_shape, dtype=np.float32))
+                    batch_predictions.append({})
+                    batch_blendshapes.append(np.zeros(52, dtype=np.float32))
+                else:
+                    # First sample failed, use default dimensions based on backend
+                    if self.fallback_level == 1 and hasattr(self.opensmile_extractor, 'use_concatenation') and \
+                       self.opensmile_extractor.use_concatenation:
+                        batch_embeddings.append(np.zeros((1, 256), dtype=np.float32))
+                    else:
+                        batch_embeddings.append(np.zeros((1, 88), dtype=np.float32))
+                    batch_predictions.append({})
+                    batch_blendshapes.append(np.zeros(52, dtype=np.float32))
+        
+        # Assign batch results to main results
+        results["embeddings"] = batch_embeddings
+        results["predictions"] = batch_predictions
+        results["blendshape_weights"] = batch_blendshapes
         
         # Convert lists to arrays/tensors
         if results["embeddings"]:
@@ -410,20 +440,41 @@ class EmotionExtractor:
         try:
             self.extraction_stats["fallback_calls"] += 1
             
-            # Process audio through sliding window extractor
-            # This handles long-term context automatically
-            features = self.opensmile_extractor.process_audio_batch(audio)
-            
-            if features is None or features.size == 0:
-                logger.warning("OpenSMILE returned empty features")
-                return None
-            
-            # Features shape: (T_features, feature_dim) or (feature_dim,)
-            if features.ndim == 1:
-                features = features[None, :]  # Add time dimension
-            
-            # Use the most recent feature vector for utterance-level processing
-            embeddings = features[-1]  # Most recent features
+            # Check if using concatenated approach
+            if hasattr(self.opensmile_extractor, 'use_concatenation') and \
+               self.opensmile_extractor.use_concatenation:
+                # Process audio through sliding window extractor for concatenated features
+                basic_features = self.opensmile_extractor.process_audio_batch(audio)
+                concatenated_features = self.opensmile_extractor.get_concatenated_features()
+                
+                if concatenated_features is not None:
+                    # Use concatenated features as embeddings (256 dimensions)
+                    embeddings = concatenated_features
+                    logger.debug(f"Using concatenated features: shape {embeddings.shape}")
+                elif basic_features is not None:
+                    # Fallback to basic features if concatenated not ready
+                    if basic_features.ndim == 1:
+                        embeddings = basic_features
+                    else:
+                        embeddings = basic_features[-1]  # Most recent
+                    logger.debug(f"Using basic features fallback: shape {embeddings.shape}")
+                else:
+                    logger.warning("Both concatenated and basic features failed")
+                    return None
+            else:
+                # Sequential approach - process audio through sliding window extractor
+                features = self.opensmile_extractor.process_audio_batch(audio)
+                
+                if features is None or features.size == 0:
+                    logger.warning("OpenSMILE returned empty features")
+                    return None
+                
+                # Features shape: (T_features, feature_dim) or (feature_dim,)
+                if features.ndim == 1:
+                    features = features[None, :]  # Add time dimension
+                
+                # Use the most recent feature vector for utterance-level processing
+                embeddings = features[-1]  # Most recent features
             
             # Enhanced emotion mapping using eGeMAPS features
             predictions = self._egemaps_to_emotion(embeddings)

@@ -8,6 +8,7 @@ defaults:
 # Global settings
 seed: 42
 device: auto  # auto, cpu, cuda
+frame_rate: 30  # 30 or 60 fps
 
 # Logging
 hydra:

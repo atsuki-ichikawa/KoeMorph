@@ -46,7 +46,9 @@
       "Bash(PYTHONPATH=/home/ichikawa/KoeMorph python3 src/train.py training.max_epochs=10 data.batch_size=4 model.smoothing.enable=false training.loss._target_=torch.nn.MSELoss data.augmentation.enable=false)",
       "Bash(PYTHONPATH=/home/ichikawa/KoeMorph python3 test_emotion_processing.py)",
       "Bash(git branch:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(git reset:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }

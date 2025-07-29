@@ -1,5 +1,6 @@
 # Dual-stream model configuration
-_target_: src.model.simplified_dual_stream_model.SimplifiedDualStreamModel
+# Use SequentialDualStreamModel for time-series training
+_target_: src.model.sequential_dual_stream_model.SequentialDualStreamModel
 
 # Architecture dimensions
 d_model: 256
@@ -8,18 +9,19 @@ num_blendshapes: 52
 
 # Audio processing
 sample_rate: 16000
-target_fps: 30
+target_fps: ${frame_rate}
 mel_sequence_length: 256  # Fixed sequence length for frequency-axis processing
+stride_frames: 1  # Number of frames to stride between windows for sequential processing
 
 # Mel-spectrogram settings
 mel:
   n_fft: 1024
-  hop_length: 533  # 16000/30 for 30 FPS
+  hop_length: null  # Calculated dynamically from frame_rate
   n_mels: 80
   f_min: 80
   f_max: 8000
 
-# Long-term context feature extraction configuration
+# Concatenated 3-window eGeMAPS configuration (PRODUCTION)
 emotion_config:
   backend: "opensmile"  # Options: emotion2vec, opensmile, basic
   # OpenSMILE eGeMAPS settings (recommended)
@@ -32,6 +34,9 @@ emotion_config:
   enable_caching: true
   batch_size: 4
   sample_rate: 16000
+  temporal_history_frames: 30  # Legacy parameter (for fallback)
+  use_concatenation: true      # Enable 3-window concatenation approach (PRODUCTION)
+  window_intervals: [0.0, 0.3, 0.6]  # Time windows: current, -300ms, -600ms
   
   # Fallback to emotion2vec if needed
   emotion2vec_model: "iic/emotion2vec_plus_large"
@@ -39,11 +44,12 @@ emotion_config:
 # Dual-stream attention settings
 dual_stream_attention:
   num_mel_channels: 80
-  emotion_dim: 88    # eGeMAPS standard (auto-determined at runtime)
+  emotion_dim: 256   # Concatenated + compressed dimension (3×88→256)
+  emotion_sequence_length: 1  # Single compressed vector (not sequential)
   use_learnable_weights: true
-  temperature: 1.0
+  temperature: 0.5   # Lower temperature for better balance with improved information density
   dropout: 0.1
-  # Removed fixed specialization - let learning discover natural patterns
+  # Natural specialization with balanced information density
 
 # Temporal smoothing
 temporal_smoothing:

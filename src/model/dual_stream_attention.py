@@ -60,7 +60,9 @@ class DualStreamCrossAttention(nn.Module):
         num_heads: int = 8,
         num_mel_channels: int = 80,
         mel_sequence_length: int = 256,
-        emotion_dim: int = 256,
+        mel_temporal_frames: int = 3,  # Additional temporal frames for mouth detail
+        emotion_dim: int = 256,  # Concatenated + compressed dimension (3×88→256)
+        emotion_sequence_length: int = 1,   # Single compressed vector
         dropout: float = 0.1,
         num_blendshapes: int = 52,
         use_learnable_weights: bool = True,
@@ -74,7 +76,9 @@ class DualStreamCrossAttention(nn.Module):
             num_heads: Number of attention heads
             num_mel_channels: Number of mel frequency channels (80)
             mel_sequence_length: Sequence length for each mel channel (256)
-            emotion_dim: Dimension of emotion2vec features (256)
+            mel_temporal_frames: Additional temporal frames for mouth detail (3)
+            emotion_dim: Dimension of concatenated eGeMAPS features (256)
+            emotion_sequence_length: Sequence length (1 for concatenated approach)
             dropout: Dropout rate
             num_blendshapes: Number of ARKit blendshapes (52)
             use_learnable_weights: Whether to use learnable stream weights
@@ -86,12 +90,16 @@ class DualStreamCrossAttention(nn.Module):
         self.num_heads = num_heads
         self.num_mel_channels = num_mel_channels
         self.mel_sequence_length = mel_sequence_length
+        self.mel_temporal_frames = mel_temporal_frames
         self.emotion_dim = emotion_dim
+        self.emotion_sequence_length = emotion_sequence_length
         self.num_blendshapes = num_blendshapes
         self.temperature = temperature
         
-        # Mel-spectrogram processing for mouth movements
-        self.mel_channel_encoder = nn.Linear(mel_sequence_length, d_model)
+        # Enhanced mel-spectrogram processing for mouth movements
+        # Long-term context: 80 × 256 = 20,480 + Short-term detail: 80 × 3 = 240 = 20,720 total
+        self.total_mel_dim = num_mel_channels * (mel_sequence_length + mel_temporal_frames)
+        self.mel_channel_encoder = nn.Linear(mel_sequence_length + mel_temporal_frames, d_model)
         self.mel_attention = nn.MultiheadAttention(
             embed_dim=d_model,
             num_heads=num_heads,
@@ -99,7 +107,7 @@ class DualStreamCrossAttention(nn.Module):
             batch_first=True
         )
         
-        # Emotion2vec processing for facial expressions
+        # Concatenated eGeMAPS processing for facial expressions
         self.emotion_encoder = nn.Linear(emotion_dim, d_model)
         self.emotion_attention = nn.MultiheadAttention(
             embed_dim=d_model,
@@ -154,15 +162,17 @@ class DualStreamCrossAttention(nn.Module):
     def forward(
         self,
         mel_features: torch.Tensor,
+        mel_temporal_features: torch.Tensor,
         emotion_features: torch.Tensor,
         return_attention: bool = False,
     ) -> Dict[str, torch.Tensor]:
         """
-        Forward pass of dual-stream cross-attention.
+        Forward pass of enhanced dual-stream cross-attention.
         
         Args:
-            mel_features: Mel-spectrogram features of shape (B, T, 80) 
-            emotion_features: Emotion2vec features of shape (B, T, 256)
+            mel_features: Long-term mel-spectrogram features of shape (B, T, 80) 
+            mel_temporal_features: Short-term mel features of shape (B, 3, 80)
+            emotion_features: Concatenated eGeMAPS features of shape (B, 256)
             return_attention: Whether to return attention weights
             
         Returns:
@@ -174,8 +184,8 @@ class DualStreamCrossAttention(nn.Module):
         batch_size = mel_features.shape[0]
         device = mel_features.device
         
-        # Process mel-spectrogram features (frequency-axis split)
-        # Reshape from (B, T, 80) to (B, 80, T) then to (B, 80, 256)
+        # Enhanced mel-spectrogram processing with temporal concatenation
+        # Long-term context: (B, T, 80) -> (B, 80, T) -> (B, 80, 256)
         mel_features = mel_features.transpose(1, 2)  # (B, 80, T)
         
         # Ensure we have exactly 256 frames (pad or truncate)
@@ -191,12 +201,20 @@ class DualStreamCrossAttention(nn.Module):
             # Truncate
             mel_features = mel_features[:, :, :self.mel_sequence_length]
         
-        # Encode mel channels as queries (each frequency band is a query)
-        mel_encoded = self.mel_channel_encoder(mel_features)  # (B, 80, d_model)
+        # Short-term temporal detail: (B, 3, 80) -> (B, 80, 3)
+        mel_temporal_features = mel_temporal_features.transpose(1, 2)  # (B, 80, 3)
+        
+        # Concatenate long-term and short-term features: (B, 80, 256+3) = (B, 80, 259)
+        enhanced_mel_features = torch.cat([mel_features, mel_temporal_features], dim=2)
+        
+        # Encode enhanced mel channels (each frequency band with temporal detail)
+        mel_encoded = self.mel_channel_encoder(enhanced_mel_features)  # (B, 80, d_model)
         mel_encoded = self.mel_norm(mel_encoded)
         
-        # Process emotion features
-        emotion_encoded = self.emotion_encoder(emotion_features)  # (B, T, d_model)
+        # Process emotion features (concatenated eGeMAPS)
+        # emotion_features expected shape: (B, 256)
+        emotion_encoded = self.emotion_encoder(emotion_features)  # (B, d_model)
+        emotion_encoded = emotion_encoded.unsqueeze(1)  # (B, 1, d_model) for attention
         emotion_encoded = self.emotion_norm(emotion_encoded)
         
         # Prepare queries for each stream
@@ -255,7 +273,7 @@ class DualStreamCrossAttention(nn.Module):
         
         if return_attention:
             output['mel_attention_weights'] = mel_attn_weights  # (B, |mouth|, 80)
-            output['emotion_attention_weights'] = emotion_attn_weights  # (B, |expr|, T)
+            output['emotion_attention_weights'] = emotion_attn_weights  # (B, |expr|, 1)
             output['mel_blendshapes'] = mel_blendshapes
             output['emotion_blendshapes'] = emotion_blendshapes
             
@@ -284,7 +302,7 @@ class DualStreamEncoder(nn.Module):
     def __init__(
         self,
         mel_dim: int = 80,
-        emotion_dim: int = 256,
+        emotion_dim: int = 256,  # Concatenated eGeMAPS dimension
         d_model: int = 256,
         num_layers: int = 2,
         dropout: float = 0.1,
@@ -294,7 +312,7 @@ class DualStreamEncoder(nn.Module):
         
         Args:
             mel_dim: Mel-spectrogram dimension
-            emotion_dim: Emotion2vec dimension
+            emotion_dim: Concatenated eGeMAPS dimension (256)
             d_model: Model dimension
             num_layers: Number of transformer layers
             dropout: Dropout rate

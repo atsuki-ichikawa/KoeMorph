@@ -66,17 +66,47 @@ class SimplifiedDualStreamModel(nn.Module):
             }
         
         logger.info("Initializing emotion extractor...")
-        self.emotion_extractor = EmotionExtractor(**emotion_config)
+        
+        # Split emotion_config into EmotionExtractor params and OpenSMILE params
+        emotion_extractor_params = {
+            key: value for key, value in emotion_config.items()
+            if key in ['backend', 'model_name', 'device', 'cache_dir', 'enable_caching', 'batch_size', 'sample_rate']
+        }
+        
+        # Store OpenSMILE-specific params for later use
+        self.opensmile_config = {
+            key: value for key, value in emotion_config.items()
+            if key not in emotion_extractor_params
+        }
+        
+        self.emotion_extractor = EmotionExtractor(**emotion_extractor_params)
+        
+        # Pass OpenSMILE config to the emotion extractor for proper initialization
+        if hasattr(self.emotion_extractor, '_initialize_opensmile'):
+            self.emotion_extractor._opensmile_config = self.opensmile_config
+        
+        # Force fallback to OpenSMILE with concatenation if backend is "opensmile"
+        if emotion_extractor_params.get("backend") == "opensmile":
+            logger.info("Forcing OpenSMILE backend initialization...")
+            self.emotion_extractor.fallback_level = 1
+            self.emotion_extractor._opensmile_config = self.opensmile_config
+            self.emotion_extractor._initialize_opensmile()
         
         # Determine emotion dimension based on the backend used
         if self.emotion_extractor.fallback_level == 0:  # emotion2vec
             self.emotion_dim = 1024
         elif self.emotion_extractor.fallback_level == 1:  # opensmile eGeMAPS
-            # Get actual feature dimension from OpenSMILE extractor
-            if hasattr(self.emotion_extractor.opensmile_extractor, 'feature_dim'):
-                self.emotion_dim = self.emotion_extractor.opensmile_extractor.feature_dim
+            # Check if using concatenation approach (PRODUCTION)
+            if hasattr(self.emotion_extractor.opensmile_extractor, 'use_concatenation') and \
+               self.emotion_extractor.opensmile_extractor.use_concatenation:
+                self.emotion_dim = 256  # Concatenated + compressed dimension
+                logger.info("Using concatenated eGeMAPS approach: 3×88→256")
             else:
-                self.emotion_dim = 88  # eGeMAPS standard feature count
+                # Legacy: get actual feature dimension from OpenSMILE extractor
+                if hasattr(self.emotion_extractor.opensmile_extractor, 'feature_dim'):
+                    self.emotion_dim = self.emotion_extractor.opensmile_extractor.feature_dim
+                else:
+                    self.emotion_dim = 88  # eGeMAPS standard feature count
         else:  # basic
             self.emotion_dim = 9  # basic prosodic features
         
@@ -114,12 +144,13 @@ class SimplifiedDualStreamModel(nn.Module):
             
         logger.info(f"Mel processing mode: {'Real-time' if self.real_time_mode else 'Batch'}")
             
-        # Dual-stream cross-attention module
+        # Enhanced dual-stream cross-attention module
         self.dual_stream_attention = DualStreamCrossAttention(
             d_model=d_model,
             num_heads=num_heads,
             num_mel_channels=self.n_mels,
             mel_sequence_length=mel_sequence_length,
+            mel_temporal_frames=3,  # 3 frames for temporal detail
             emotion_dim=self.emotion_dim,
             dropout=0.1,
             num_blendshapes=num_blendshapes,
@@ -132,24 +163,28 @@ class SimplifiedDualStreamModel(nn.Module):
         self.smoothing_alpha = nn.Parameter(torch.tensor(0.8))
         self.prev_blendshapes = None
         
-    def extract_mel_features(self, audio: torch.Tensor) -> torch.Tensor:
+    def extract_mel_features(self, audio: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Extract mel-spectrogram features from audio.
+        Extract enhanced mel-spectrogram features from audio.
         
         Args:
             audio: Audio tensor of shape (B, T)
             
         Returns:
-            Mel features of shape (B, T_mel, 80)
+            Tuple of:
+            - Long-term mel features of shape (B, T_mel, 80)
+            - Short-term mel features of shape (B, 3, 80) for temporal detail
         """
         batch_size, audio_length = audio.shape
         
         # Convert to numpy for librosa processing
-        mel_features = []
+        long_term_features = []
+        short_term_features = []
+        
         for i in range(batch_size):
             audio_np = audio[i].cpu().numpy()
             
-            # Extract mel-spectrogram
+            # Extract full mel-spectrogram for long-term context
             mel = librosa.feature.melspectrogram(
                 y=audio_np,
                 sr=self.sample_rate,
@@ -164,16 +199,34 @@ class SimplifiedDualStreamModel(nn.Module):
             mel = librosa.power_to_db(mel, ref=np.max)
             mel = (mel + 80) / 80  # Normalize to approximately [0, 1]
             
-            mel_features.append(mel.T)  # (T_mel, 80)
+            mel_T = mel.T  # (T_mel, 80)
+            long_term_features.append(mel_T)
+            
+            # Extract short-term temporal detail (last 3 frames)
+            if mel_T.shape[0] >= 3:
+                temporal_detail = mel_T[-3:]  # (3, 80) - last 3 frames
+            else:
+                # Pad if we don't have enough frames
+                temporal_detail = np.zeros((3, self.n_mels))
+                if mel_T.shape[0] > 0:
+                    temporal_detail[:mel_T.shape[0]] = mel_T
+            
+            short_term_features.append(temporal_detail)
         
-        # Stack and convert to tensor
-        max_length = max(feat.shape[0] for feat in mel_features)
-        padded_features = np.zeros((batch_size, max_length, self.n_mels))
+        # Stack long-term features
+        max_length = max(feat.shape[0] for feat in long_term_features)
+        long_term_padded = np.zeros((batch_size, max_length, self.n_mels))
         
-        for i, feat in enumerate(mel_features):
-            padded_features[i, :feat.shape[0], :] = feat
+        for i, feat in enumerate(long_term_features):
+            long_term_padded[i, :feat.shape[0], :] = feat
         
-        return torch.tensor(padded_features, dtype=torch.float32, device=audio.device)
+        # Stack short-term features
+        short_term_stacked = np.stack(short_term_features)  # (B, 3, 80)
+        
+        return (
+            torch.tensor(long_term_padded, dtype=torch.float32, device=audio.device),
+            torch.tensor(short_term_stacked, dtype=torch.float32, device=audio.device)
+        )
     
     def extract_emotion_features(self, audio: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         """
@@ -184,7 +237,7 @@ class SimplifiedDualStreamModel(nn.Module):
             
         Returns:
             Tuple of:
-            - Emotion features of shape (B, T_emotion, emotion_dim)
+            - Emotion features of shape (B, emotion_dim) for concatenated or (B, T_emotion, emotion_dim) for sequential
             - Metadata dictionary with extraction info
         """
         # Extract emotion features using the robust extractor
@@ -199,11 +252,19 @@ class SimplifiedDualStreamModel(nn.Module):
             batch_size = audio.shape[0]
             logger.warning("Emotion extraction failed, using dummy features")
             
-            dummy_features = torch.randn(
-                batch_size, 1, self.emotion_dim, device=audio.device
-            ) * 0.1
-            
-            return dummy_features, {"backend_used": "dummy", "extraction_failed": True}
+            if hasattr(self.emotion_extractor.opensmile_extractor, 'use_concatenation') and \
+               self.emotion_extractor.opensmile_extractor.use_concatenation:
+                # Concatenated approach: return (B, 256)
+                dummy_features = torch.randn(
+                    batch_size, self.emotion_dim, device=audio.device
+                ) * 0.1
+                return dummy_features, {"backend_used": "dummy", "extraction_failed": True}
+            else:
+                # Sequential approach: return (B, 1, emotion_dim)
+                dummy_features = torch.randn(
+                    batch_size, 1, self.emotion_dim, device=audio.device
+                ) * 0.1
+                return dummy_features, {"backend_used": "dummy", "extraction_failed": True}
         
         # Convert embeddings to tensor
         emotion_embeddings = torch.tensor(
@@ -212,17 +273,31 @@ class SimplifiedDualStreamModel(nn.Module):
             device=audio.device
         )
         
-        # Ensure proper shape (B, T_emotion, emotion_dim)
-        if emotion_embeddings.ndim == 2:  # (B, emotion_dim)
-            emotion_embeddings = emotion_embeddings.unsqueeze(1)  # (B, 1, emotion_dim)
-        
-        # For utterance-level features, we might want to replicate across time
-        # to match mel-spectrogram temporal resolution
-        target_seq_len = max(1, int(audio.shape[1] / self.sample_rate * 2))  # ~2 Hz
-        if emotion_embeddings.shape[1] == 1 and target_seq_len > 1:
-            emotion_embeddings = emotion_embeddings.repeat(1, target_seq_len, 1)
-        
-        return emotion_embeddings, results["metadata"]
+        # Check if using concatenated approach
+        if hasattr(self.emotion_extractor.opensmile_extractor, 'use_concatenation') and \
+           self.emotion_extractor.opensmile_extractor.use_concatenation:
+            # Concatenated approach: return features as (B, 256)
+            if emotion_embeddings.ndim == 2:  # Already (B, emotion_dim)
+                return emotion_embeddings, results["metadata"]
+            elif emotion_embeddings.ndim == 1:  # Single sample (emotion_dim,)
+                return emotion_embeddings.unsqueeze(0), results["metadata"]  # (1, emotion_dim)
+            else:
+                # Unexpected shape, flatten to (B, emotion_dim)
+                batch_size = audio.shape[0]
+                emotion_embeddings = emotion_embeddings.view(batch_size, -1)
+                return emotion_embeddings, results["metadata"]
+        else:
+            # Sequential approach: ensure proper shape (B, T_emotion, emotion_dim)
+            if emotion_embeddings.ndim == 2:  # (B, emotion_dim)
+                emotion_embeddings = emotion_embeddings.unsqueeze(1)  # (B, 1, emotion_dim)
+            
+            # For utterance-level features, we might want to replicate across time
+            # to match mel-spectrogram temporal resolution
+            target_seq_len = max(1, int(audio.shape[1] / self.sample_rate * 2))  # ~2 Hz
+            if emotion_embeddings.shape[1] == 1 and target_seq_len > 1:
+                emotion_embeddings = emotion_embeddings.repeat(1, target_seq_len, 1)
+            
+            return emotion_embeddings, results["metadata"]
     
     def align_features(
         self, 
@@ -234,29 +309,34 @@ class SimplifiedDualStreamModel(nn.Module):
         
         Args:
             mel_features: Mel features (B, T_mel, 80)
-            emotion_features: Emotion features (B, T_emotion, emotion_dim)
+            emotion_features: Emotion features (B, emotion_dim) for concatenated or (B, T_emotion, emotion_dim) for sequential
             
         Returns:
             Aligned features with same temporal dimension
         """
-        # For simplicity, we'll interpolate emotion features to match mel timeline
-        # In practice, emotion changes more slowly than audio features
-        
-        B, T_mel, _ = mel_features.shape
-        B_e, T_emotion, _ = emotion_features.shape
-        
-        if T_emotion != T_mel:
-            # Interpolate emotion features to match mel timeline
-            emotion_features = emotion_features.transpose(1, 2)  # (B, emotion_dim, T_emotion)
-            emotion_features = F.interpolate(
-                emotion_features,
-                size=T_mel,
-                mode='linear',
-                align_corners=False
-            )
-            emotion_features = emotion_features.transpose(1, 2)  # (B, T_mel, emotion_dim)
+        # Check if using concatenated approach
+        if hasattr(self.emotion_extractor.opensmile_extractor, 'use_concatenation') and \
+           self.emotion_extractor.opensmile_extractor.use_concatenation:
+            # Concatenated approach: emotion_features is (B, 256), no alignment needed
+            # The dual_stream_attention expects (B, emotion_dim) for concatenated features
+            return mel_features, emotion_features
+        else:
+            # Sequential approach: align temporal dimensions
+            B, T_mel, _ = mel_features.shape
+            B_e, T_emotion, _ = emotion_features.shape
             
-        return mel_features, emotion_features
+            if T_emotion != T_mel:
+                # Interpolate emotion features to match mel timeline
+                emotion_features = emotion_features.transpose(1, 2)  # (B, emotion_dim, T_emotion)
+                emotion_features = F.interpolate(
+                    emotion_features,
+                    size=T_mel,
+                    mode='linear',
+                    align_corners=False
+                )
+                emotion_features = emotion_features.transpose(1, 2)  # (B, T_mel, emotion_dim)
+                
+            return mel_features, emotion_features
     
     def apply_temporal_smoothing(self, blendshapes: torch.Tensor) -> torch.Tensor:
         """
@@ -271,7 +351,10 @@ class SimplifiedDualStreamModel(nn.Module):
         if not self.use_temporal_smoothing:
             return blendshapes
             
-        if self.prev_blendshapes is None:
+        batch_size = blendshapes.shape[0]
+        
+        # Check if previous blendshapes exist and have the correct batch size
+        if self.prev_blendshapes is None or self.prev_blendshapes.shape[0] != batch_size:
             self.prev_blendshapes = blendshapes.detach()
             return blendshapes
         
@@ -305,8 +388,8 @@ class SimplifiedDualStreamModel(nn.Module):
         # Initialize results dictionary
         results = {}
         
-        # Extract features
-        mel_features = self.extract_mel_features(audio)  # (B, T_mel, 80)
+        # Extract enhanced features
+        mel_features, mel_temporal_features = self.extract_mel_features(audio)  # (B, T_mel, 80), (B, 3, 80)
         
         # Extract emotion features with metadata
         emotion_features, emotion_metadata = self.extract_emotion_features(audio)
@@ -318,9 +401,10 @@ class SimplifiedDualStreamModel(nn.Module):
         # Align temporal dimensions
         mel_features, emotion_features = self.align_features(mel_features, emotion_features)
         
-        # Apply dual-stream attention
+        # Apply enhanced dual-stream attention
         output = self.dual_stream_attention(
             mel_features=mel_features,
+            mel_temporal_features=mel_temporal_features,
             emotion_features=emotion_features,
             return_attention=return_attention,
         )

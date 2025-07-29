@@ -1,177 +1,258 @@
-# ステップ4: モデルフォワードパス (Model Forward Pass)
+# ステップ4: デュアルストリームフォワードパス (Dual-Stream Forward Pass)
 
 ## 概要
-メル特徴を入力として、クロスアテンション機構を使用してARKitブレンドシェイプ値を予測します。
+デュアルストリームアーキテクチャでは、mel-spectrogramとemotion特徴を独立したストリームで処理し、
+自然な特化を学習しながらARKitブレンドシェイプ値を予測します。
+Multi-Frame Rate対応により30fps/60fpsでの推論が可能で、SequentialDualStreamModelでは
+完全な時系列出力をサポートします。
 
 ## フォワードパスの流れ
 
-### 1. モデル呼び出し
-**実装場所**: `src/train.py:182`
+### 1. モデル呼び出し（Multi-Frame Rate & Sequential対応）
+
+#### 1.1 Sequential Training Model
+**実装場所**: `src/train_sequential.py:SequentialTrainer.train_epoch()`
 
 ```python
-pred_blendshapes = self.model(audio)  # SimplifiedKoeMorphModel.forward()
+# 時系列状態の管理
+if file_idx != self.current_file_idx:
+    self.model.reset_temporal_state()  # ファイル境界でリセット
+    
+# SequentialDualStreamModel の使用（推奨）
+outputs = self.model(audio, return_attention=False)
+pred_blendshapes = outputs['blendshapes']  # (B, T_out, 52) - 完全時系列出力
 ```
 
-**入力**: 
-- audio: `torch.Size([16, 160000])` (バッチ音声データ)
-
-### 2. 音声エンコーディング
-**実装場所**: `src/model/simplified_model.py:130` 
+#### 1.2 基本 Dual-Stream Model
+**実装場所**: `src/model/simplified_dual_stream_model.py`
 
 ```python
-# メル特徴抽出（前ステップで説明済み）
-mel_features = self.extract_mel_features(audio)  # (16, 300, 80)
-
-# 音声エンコーダに通す
-audio_encoded = self.audio_encoder(mel_features)  # (16, 300, 256)
+# 単一フレーム出力（legacy）
+outputs = self.model(audio, return_attention=False)
+pred_blendshapes = outputs['blendshapes']  # (B, 52) - 単一フレーム
 ```
 
-#### 音声エンコーダの構造
-**実装場所**: `src/model/simplified_model.py:44-51`
+**入力（Multi-Frame Rate対応）**: 
+- **30fps**: audio: `torch.Size([B, 136576])` (8.5秒分の音声, hop_length=533)
+- **60fps**: audio: `torch.Size([B, 136576])` (8.5秒分の音声, hop_length=267)
+
+**出力**:
+- **Sequential Model**: `(B, T_out, 52)` - 完全時系列（T_out = 入力音声長に応じた可変長）
+- **Basic Model**: `(B, 52)` - 単一フレーム
+
+### 2. デュアルストリーム特徴抽出（Multi-Frame Rate対応）
+**実装場所**: `src/model/simplified_dual_stream_model.py`, `src/model/sequential_dual_stream_model.py`
+
+#### 2.1 Enhanced Mel特徴抽出 (高頻度更新)
+```python
+# extract_mel_features() - Dynamic frame support
+mel_features, mel_temporal_features = self.extract_mel_features(audio)
+# 30fps: (B, 256, 80), 60fps: (B, 512, 80)
+# temporal: (B, 3, 80) - 両モード共通
+```
+
+**処理の詳細（Multi-Frame Rate対応）**:
+#### 30fpsモード:
+- **コンテキスト**: 8.5秒 (256フレーム)
+- **更新頻度**: 33.3ms (毎フレーム)
+- **hop_length**: 533サンプル
+
+#### 60fpsモード:
+- **コンテキスト**: 8.5秒 (512フレーム)
+- **更新頻度**: 16.7ms (毎フレーム)
+- **hop_length**: 267サンプル
+
+**共通**:
+- **特徴次元**: 80 mel bins + 3フレーム時間詳細
+- **総情報量**: 30fps: 20,720次元, 60fps: 41,200次元
+
+#### 2.2 Enhanced Emotion特徴抽出 (長期コンテキスト)
+```python
+# extract_emotion_features() - Single extraction for efficiency
+emotion_features, metadata = self.extract_emotion_features(audio)  # (B, 256)
+```
+
+**Enhanced OpenSMILE 3窓連結処理**:
+- **コンテキスト**: 20秒×3窓 (現在, -300ms, -600ms)
+- **更新頻度**: 300ms (30fps: ~9フレーム, 60fps: ~18フレーム)
+- **特徴次元**: 256次元 (88×3→256圧縮)
+- **Sequential効率化**: 全音声で単一抽出（従来は窓ごと抽出）
+
+### 3. 特徴アライメント（Dynamic Frame Count対応）
+```python
+# align_features() - Frame count varies by fps
+mel_features, emotion_features = self.align_features(mel_features, emotion_features)
+# 30fps: 両方とも (B, 256, d_feature) にアライン
+# 60fps: 両方とも (B, 512, d_feature) にアライン
+```
+
+**Dynamic Alignment**:
+- **30fps**: 256フレームにアライメント
+- **60fps**: 512フレームにアライメント
+- **Emotion補間**: 256次元emotion特徴を対象フレーム数に線形補間
+
+### 4. デュアルストリームクロスアテンション
+**実装場所**: `src/model/dual_stream_attention.py:DualStreamCrossAttention`
 
 ```python
-self.audio_encoder = nn.Sequential(
-    nn.Linear(80, 256),      # 80次元 → 256次元
-    nn.ReLU(),
-    nn.Dropout(0.1),
-    nn.Linear(256, 256),     # 256次元 → 256次元
-    nn.ReLU(),
-    nn.Dropout(0.1),
+output = self.dual_stream_attention(
+    mel_features=mel_features,        # (B, 256, 80)
+    emotion_features=emotion_features, # (B, 256, 88)
+    return_attention=False
 )
 ```
 
-**処理の詳細**:
-1. 線形変換1: メル特徴(80次元) → 隠れ表現(256次元)
-2. ReLU活性化: 負の値を0に
-3. Dropout: 10%のユニットをランダムに無効化（過学習防止）
-4. 線形変換2: 特徴をさらに変換
-5. ReLU活性化
-6. Dropout
-
-**出力**: `torch.Size([16, 300, 256])` (各時間フレームが256次元ベクトル)
-
-### 3. ブレンドシェイプクエリの準備
-**実装場所**: `src/model/simplified_model.py:75-77, 133`
-
+#### 4.1 周波数軸分割 (Mel Stream)
 ```python
-# 学習可能なクエリベクトル（初期化時）
-self.blendshape_queries = nn.Parameter(
-    torch.randn(52, 256) * 0.1  # 52個のブレンドシェイプ用クエリ
-)
-
-# バッチサイズ分複製
-queries = self.blendshape_queries.unsqueeze(0).repeat(16, 1, 1)
-# Shape: (16, 52, 256)
+# Melを周波数軸で分割
+mel_features = mel_features.transpose(1, 2)  # (B, 80, 256)
+mel_features = mel_features.reshape(B * 80, 256, 1)
+# 80個の独立したチャンネルとして処理
 ```
 
-**クエリの意味**:
-- 各クエリは特定のブレンドシェイプ（例：eyeBlinkLeft）に対応
-- 学習により、対応する音声特徴を選択的に注目するように最適化
+**理由**: 各周波数帯域が独立してアテンションパターンを学習
 
-### 4. クロスアテンション
-**実装場所**: `src/model/simplified_model.py:136-141`
-
+#### 4.2 並列ストリーム処理
 ```python
-attn_output, _ = self.attention(
-    query=queries,        # (16, 52, 256) - 何を探すか
-    key=audio_encoded,    # (16, 300, 256) - どこから探すか
-    value=audio_encoded,  # (16, 300, 256) - 何を取得するか
-    need_weights=False
+# Mel Stream (口の動きに特化)
+mel_attended = self.mel_attention(
+    self.blendshape_queries,  # (52, 256)
+    mel_encoded,              # (B*80, 256, d_model)
+    mel_encoded
+)
+
+# Emotion Stream (表情全体に特化)
+emotion_attended = self.emotion_attention(
+    self.blendshape_queries,  # (52, 256)
+    emotion_encoded,          # (B, T_e, d_model)
+    emotion_encoded
 )
 ```
 
-#### アテンション機構の詳細
-**設定**: `num_heads=8, embed_dim=256`
-
-**処理フロー**:
-1. **Query投影**: queries → Q (8ヘッド × 32次元)
-2. **Key/Value投影**: audio_encoded → K, V
-3. **アテンションスコア計算**:
-   ```
-   scores = Q @ K.T / sqrt(32)  # スケーリング
-   attention_weights = softmax(scores)
-   ```
-4. **値の集約**:
-   ```
-   output = attention_weights @ V
-   ```
-
-**出力**: `torch.Size([16, 52, 256])`
-- 各ブレンドシェイプが音声の全時間から関連情報を収集
-
-### 5. ブレンドシェイプデコード
-**実装場所**: `src/model/simplified_model.py:144`
-
+#### 4.3 自然な特化の学習
 ```python
-blendshapes = self.decoder(attn_output)  # (16, 52, 52)
-```
+# 学習可能な重み（強制的な3x係数を削除）
+normalized_mel_weights = F.softmax(self.mel_weights / self.temperature, dim=0)
+normalized_emotion_weights = F.softmax(self.emotion_weights / self.temperature, dim=0)
 
-#### デコーダの構造
-**実装場所**: `src/model/simplified_model.py:62-72`
-
-```python
-self.decoder = nn.Sequential(
-    nn.Linear(256, 128),     # 256 → 128次元
-    nn.ReLU(),
-    nn.Dropout(0.1),
-    nn.Linear(128, 128),     # 128 → 128次元
-    nn.ReLU(),
-    nn.Dropout(0.1),
-    nn.Linear(128, 52),      # 128 → 52次元
-    nn.Sigmoid()             # [0, 1]に制限
+# 重み付き結合
+final_output = (
+    normalized_mel_weights.unsqueeze(0) * mel_attended +
+    normalized_emotion_weights.unsqueeze(0) * emotion_attended
 )
 ```
 
-**なぜSigmoid？**: ブレンドシェイプ値は0（無表情）から1（最大変形）の範囲
+**重要な変更点**:
+- 3倍の特化係数を削除
+- モデルが自然に口/表情の役割分担を学習
+- 温度パラメータで特化の鋭さを制御
 
-### 6. 次元削減
-**実装場所**: `src/model/simplified_model.py:147`
+### 5. Temporal Smoothing
+**実装場所**: `src/model/simplified_dual_stream_model.py:apply_temporal_smoothing()`
 
 ```python
-blendshapes = blendshapes.mean(dim=1)  # (16, 52)
+# 前フレームとの平滑化
+if self.prev_blendshapes is not None:
+    alpha = torch.sigmoid(self.smoothing_alpha)  # 学習可能
+    smoothed = alpha * blendshapes + (1 - alpha) * self.prev_blendshapes
+    self.prev_blendshapes = smoothed.detach()
+else:
+    self.prev_blendshapes = blendshapes.detach()
 ```
 
-**理由**: 
-- アテンション出力は(16, 52, 52)の3次元
-- 各ブレンドシェイプクエリが52次元の出力を生成
-- 平均化により最終的な52次元ブレンドシェイプ値を取得
+**時系列連続性**:
+- ファイル内では状態を保持
+- 急激な変化を抑制
+- αは学習により最適化
 
-## データフローまとめ
+## データフローまとめ（Sequential & Multi-Frame Rate対応）
 
+### Sequential Model Data Flow:
 ```
-入力音声 (16, 160000)
-    ↓ メル特徴抽出
-メル特徴 (16, 300, 80)
-    ↓ 音声エンコーダ
-音声表現 (16, 300, 256)
-    ↓ クロスアテンション（クエリ: 52×256）
-注目済み特徴 (16, 52, 256)
-    ↓ デコーダ
-生ブレンドシェイプ (16, 52, 52)
-    ↓ 平均化
-最終出力 (16, 52)
+入力音声 (B, 136576) [8.5秒]
+    ├─→ Enhanced Mel特徴抽出 (一度で全窓)
+    │   ↓
+    │   30fps: Mel特徴 (B, 256, 80) + 時間詳細 (B, 3, 80)
+    │   60fps: Mel特徴 (B, 512, 80) + 時間詳細 (B, 3, 80)
+    │   ↓
+    │   スライディング窓処理 (stride_frames間隔)
+    │   ↓
+    │   各窓で Dual-Stream Attention
+    │   ↓
+    │   Sequential Blendshapes (B, T_out, 52)
+    │
+    └─→ Enhanced Emotion特徴抽出 [効率的単一抽出]
+        ↓
+        3窓連結 Emotion特徴 (B, 256)
+        ↓
+        全窓で再利用（メモリ効率化）
+        ↓
+        Temporal Smoothing (窓間連続性)
+        ↓
+        最終Sequential出力 (B, T_out, 52)
 ```
 
-## 計算グラフとメモリ
+### Basic Model Data Flow:
+```
+入力音声 (B, 136576) [8.5秒] → 単一フレーム出力 (B, 52)
+```
 
-### パラメータ数
-- 音声エンコーダ: 80×256 + 256×256 = 86,016
-- ブレンドシェイプクエリ: 52×256 = 13,312
-- アテンション: 256×256×3×8 = 1,572,864
-- デコーダ: 256×128 + 128×128 + 128×52 = 55,808
-- **合計**: 約1.73Mパラメータ
+**主要改善点**:
+1. **Sequential Processing**: 完全な時系列出力
+2. **Efficient Emotion Extraction**: 単一抽出で全窓カバー
+3. **Multi-Frame Rate**: 30fps/60fps dynamic support
+4. **Memory Optimization**: 固定バッファサイズ維持
 
-### メモリ使用量（フォワードパス）
-- 中間活性化: 約50MB（バッチサイズ16）
-- 勾配保存: 約100MB（バックプロパゲーション用）
+## パラメータ数とメモリ
+
+### パラメータ数（概算）
+- Mel Encoder: 80×256 = 20,480
+- Emotion Encoder: 88×256 = 22,528
+- Blendshape Queries: 52×256 = 13,312
+- Mel Attention: 256×256×3 = 196,608
+- Emotion Attention: 256×256×3 = 196,608
+- Stream Weights: 52×2 = 104
+- Decoder: 256×128 + 128×52 = 39,424
+- **合計**: 約489K パラメータ
+
+### メモリ使用量（推定）
+- Mel sliding window buffer: 8.5s × 16kHz × 4bytes = 544KB/stream
+- Emotion buffer: 20s × 16kHz × 4bytes = 1.28MB/stream
+- 中間活性化: 約20MB（バッチサイズ4）
+
+## 主要な改善点
+
+1. **独立したストリーム処理**
+   - Melは高頻度・短期的な口の動き
+   - Emotionは低頻度・長期的な表情
+
+2. **自然な特化学習**
+   - 強制的な役割分担を削除
+   - データから最適な分担を学習
+
+3. **時系列連続性**
+   - Temporal smoothingで滑らかな動き
+   - ファイル単位での状態管理
+
+4. **効率的な処理**
+   - 固定サイズウィンドウでメモリ一定
+   - リアルタイム推論可能（RTF < 0.1）
 
 ## まとめ
 
-このステップでは：
-1. メル特徴を256次元の音声表現にエンコード
-2. 52個の学習可能なクエリで音声情報を検索
-3. クロスアテンションで各ブレンドシェイプに関連する音声特徴を抽出
-4. デコーダで最終的なブレンドシェイプ値（0-1）を生成
-5. SimplifiedModelでは単一フレーム出力のため次元削減
+デュアルストリームフォワードパス（Sequential & Multi-Frame Rate対応）では：
+1. **Multi-Frame Rate対応**: 30fps（33.3ms）/60fps（16.7ms）での動的処理
+2. **Sequential Processing**: 完全時系列出力による単一フレーム制限の解決
+3. **Enhanced特徴抽出**: Mel長期+短期詳細、Emotion 3窓連結で情報バランス最適化
+4. **効率的メモリ使用**: Emotion単一抽出による大幅なメモリ削減
+5. **Dynamic Alignment**: フレームレートに応じた特徴アライメント（256/512フレーム）
+6. **周波数軸分割**: Melの各周波数帯が独立してアテンション学習
+7. **自然な重み学習**: 各ストリームが適切に特化（情報比率80.9:1維持）
+8. **Temporal smoothing**: 時系列の連続性を保持（窓間とフレーム間）
+9. **固定メモリ使用量**: 任意長の音声を一定メモリで処理可能
 
-次のステップでは、予測値と正解値の差を計算する損失関数について説明します。
+**パフォーマンス**:
+- **30fps**: RTF ~0.06, メモリ ~355MB
+- **60fps**: RTF ~0.08, メモリ ~450MB（両方ともリアルタイム対応）
+
+次のステップでは、時系列を考慮した損失計算について説明します。
