@@ -1,0 +1,16 @@
+# Dual-stream model configuration for 60fps
+# Inherits from dual_stream.yaml with 60fps-specific overrides
+defaults:
+  - dual_stream
+
+# Override for 60fps
+target_fps: ${frame_rate}  # Will be 60 when frame_rate=60
+
+# Adjusted mel sequence length for same time window
+# 30fps: 256 frames = 8.53s
+# 60fps: 512 frames = 8.53s
+mel_sequence_length: ${eval:'512 if ${frame_rate} == 60 else 256'}
+
+# Note: hop_length is calculated dynamically in the model
+# 30fps: hop_length = 533
+# 60fps: hop_length = 267
