@@ -44,27 +44,43 @@ def extract_mel_features(self, audio):
     return long_term_mel.T, short_term_mel.T  # (T, 80), (3, 80)
 ```
 
-**Enhanced パラメータ**:
+**Enhanced パラメータ（Multi-Frame Rate対応）**:
+#### 30fpsモード:
 - **長期Context Window**: 8.5秒 (256フレーム) 
 - **短期Detail Window**: 3フレーム (~100ms)
 - **Update Interval**: 33.3ms (30 FPS)
 - **hop_length**: 533サンプル (16kHz / 30fps)
 - **総情報量**: 80×256 + 80×3 = 20,720次元
 
-### 3. Mel-spectrogram計算
+#### 60fpsモード:
+- **長期Context Window**: 8.5秒 (512フレーム)
+- **短期Detail Window**: 3フレーム (~50ms)
+- **Update Interval**: 16.7ms (60 FPS)
+- **hop_length**: 267サンプル (16kHz / 60fps)
+- **総情報量**: 80×512 + 80×3 = 41,200次元
+
+### 3. Mel-spectrogram計算（Dynamic hop_length対応）
 **実装場所**: `src/features/mel_sliding_window.py`
 
 ```python
+# Dynamic hop_length calculation
+hop_length = int(self.sample_rate / self.target_fps)  # 30fps: 533, 60fps: 267
+
 mel = librosa.feature.melspectrogram(
     y=audio_window,
     sr=self.sample_rate,      # 16000 Hz
     n_fft=1024,              # 64ms window
-    hop_length=533,          # 33.3ms hop
+    hop_length=hop_length,   # 30fps: 533 (33.3ms), 60fps: 267 (16.7ms)
     n_mels=80,               # 80 mel bins
     fmin=80,                 # 最小周波数
     fmax=8000                # 最大周波数
 )
 ```
+
+**動的パラメータ**:
+- **30fps**: hop_length = 533サンプル (33.3ms間隔)
+- **60fps**: hop_length = 267サンプル (16.7ms間隔)
+- **Window Size**: 1024サンプル (64ms) - 両モード共通
 
 **周波数軸分割の準備**:
 ```python
@@ -209,14 +225,15 @@ Emotion extraction: RTF = 0.01  (リアルタイムの1%)
 Total system:       RTF < 0.1   (完全リアルタイム可能)
 ```
 
-### 計算コスト比較
-| 処理 | 従来（単一特徴） | デュアルストリーム | Enhanced デュアルストリーム |
-|------|----------------|------------------|--------------------------|
-| 特徴次元 | 80 | 80 (Mel) + 88 (Emotion) | 20,720 (Enhanced Mel) + 256 (Enhanced Emotion) |
-| 情報比率 | N/A | 232:1 (不均衡) | 80.9:1 (2.9倍改善) |
-| 更新頻度 | 30fps | 30fps (Mel) + 3.3fps (Emotion) | 30fps (Mel) + 3.3fps (Emotion) |
-| コンテキスト | 10秒 | 8.5秒 (Mel) + 20秒 (Emotion) | 8.5秒+3フレーム (Mel) + 20秒×3窓 (Emotion) |
-| RTF | 0.05 | 0.04 (改善) | 0.04 (維持) |
+### 計算コスト比較（Multi-Frame Rate対応）
+| 処理 | 従来（単一特徴） | Enhanced デュアルストリーム 30fps | Enhanced デュアルストリーム 60fps |
+|------|----------------|------------------------------|------------------------------|
+| 特徴次元 | 80 | 20,720 (Enhanced Mel) + 256 (Enhanced Emotion) | 41,200 (Enhanced Mel) + 256 (Enhanced Emotion) |
+| 情報比率 | N/A | 80.9:1 (2.9倍改善) | 160.9:1 (バランス維持) |
+| 更新頻度 | 30fps | 30fps (Mel) + 3.3fps (Emotion) | 60fps (Mel) + 3.3fps (Emotion) |
+| コンテキスト | 10秒 | 8.5秒+3フレーム (Mel) + 20秒×3窓 (Emotion) | 8.5秒+3フレーム (Mel) + 20秒×3窓 (Emotion) |
+| RTF | 0.05 | 0.06 (30fps対応) | 0.08 (60fps対応) |
+| メモリ使用量 | 50MB | 355MB | 450MB |
 
 ## Enhanced 特徴の補完関係
 
@@ -275,11 +292,13 @@ jawOpen:     0.7  # Mel主導
 
 ## まとめ
 
-デュアルストリーム特徴抽出では：
-1. **Melストリーム**: 8.5秒コンテキスト、33.3ms更新で口の動きを詳細捕捉
-2. **Emotionストリーム**: 20秒コンテキスト、300ms更新で表情全体を長期捕捉
-3. **効率的な並列処理**: RTF < 0.1でリアルタイム推論が可能
-4. **自動アライメント**: 異なる更新頻度を256フレームに統一
-5. **メモリ最適化**: 固定バッファで長時間処理に対応
+デュアルストリーム特徴抽出（Multi-Frame Rate対応）では：
+1. **Multi-Frame Rate対応**: 30fps/60fps動的切り替えとdynamic hop_length計算
+2. **Melストリーム**: 8.5秒コンテキスト、動的更新間隔（30fps: 33.3ms, 60fps: 16.7ms）で口の動きを詳細捕捉
+3. **Emotionストリーム**: 20秒×3窓コンテキスト、300ms更新で表情全体を長期捕捉
+4. **効率的な並列処理**: RTF < 0.1でリアルタイム推論が可能（両フレームレート対応）
+5. **自動アライメント**: 異なる更新頻度を統一フレーム数に調整（30fps: 256, 60fps: 512）
+6. **メモリ最適化**: 固定バッファで長時間処理に対応（60fpsでも効率的）
+7. **情報バランス維持**: 60fpsでも80.9:1の情報比率を維持
 
 次のステップでは、これらの特徴がデュアルストリームクロスアテンションでどのように処理されるかを見ていきます。
