@@ -20,7 +20,7 @@ from tqdm import tqdm
 import hydra
 from omegaconf import DictConfig
 
-from src.model.sequential_dual_stream_model import SequentialDualStreamModel
+from src.model.sequential_dual_stream_model_fixed import SequentialDualStreamModelFixed as SequentialDualStreamModel
 from src.data.sequential_dataset import create_sequential_dataloader
 from src.data.koemorph_dataset import SequentialKoeMorphDataset
 from src.model.losses import (
@@ -540,7 +540,7 @@ def main(cfg: DictConfig):
         emotion_config=model_config.get('emotion_config', {}),
         device=str(device),
         real_time_mode=model_config.get('real_time_mode', False),
-        stride_frames=window_frames,  # Output full sequence, not sliding windows
+        stride_frames=1,  # Dense output for all frames in sequence
     )
     
     # Log model info
