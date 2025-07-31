@@ -1,0 +1,50 @@
+# Data configuration for new KoeMorph data format (v2.0)
+# This configuration uses the new folder structure with metadata support
+
+# Use the new dataset implementation
+_target_: src.data.koemorph_dataset.KoeMorphDataModule
+
+# Dataset paths - New structure
+train_data_dir: "/home/ichikawa/KoeMorph/koemorph_learning_data/data/processed"
+val_data_dir: "/home/ichikawa/KoeMorph/koemorph_learning_data/data/processed"
+test_data_dir: "/home/ichikawa/KoeMorph/koemorph_learning_data/data/processed"
+
+# Data split configuration
+# Since all data is in one directory, we'll split it dynamically
+data_split:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42
+
+# Audio preprocessing
+sample_rate: 16000
+audio_max_length: 10.0  # seconds
+
+# ARKit blendshapes
+num_blendshapes: 52
+target_fps: ${frame_rate}  # Will use frame_rate from main config
+
+# DataLoader settings
+batch_size: 16
+num_workers: 4
+pin_memory: true
+
+# Sequential dataset settings
+sequential:
+  window_frames: 512  # ~8.5 seconds at 60fps
+  stride_frames: 256  # 50% overlap for training
+
+# Augmentation
+augmentation:
+  enable: true
+  pitch_shift_range: [-2, 2]  # semitones
+  time_stretch_range: [0.8, 1.2]
+  noise_prob: 0.3
+  noise_snr_range: [10, 30]  # dB
+
+# New format specific settings
+metadata:
+  use_timecode: true  # Use timecode information if available
+  verify_sync: true   # Verify audio-blendshape synchronization
+  auto_detect_fps: true  # Automatically detect source FPS from metadata

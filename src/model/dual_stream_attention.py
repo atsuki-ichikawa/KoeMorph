@@ -211,10 +211,20 @@ class DualStreamCrossAttention(nn.Module):
         mel_encoded = self.mel_channel_encoder(enhanced_mel_features)  # (B, 80, d_model)
         mel_encoded = self.mel_norm(mel_encoded)
         
-        # Process emotion features (concatenated eGeMAPS)
-        # emotion_features expected shape: (B, 256)
-        emotion_encoded = self.emotion_encoder(emotion_features)  # (B, d_model)
-        emotion_encoded = emotion_encoded.unsqueeze(1)  # (B, 1, d_model) for attention
+        # Process emotion features
+        # Handle both concatenated (B, emotion_dim) and sequential (B, T, emotion_dim) approaches
+        if emotion_features.ndim == 2:
+            # Concatenated approach: (B, emotion_dim)
+            emotion_encoded = self.emotion_encoder(emotion_features)  # (B, d_model)
+            emotion_encoded = emotion_encoded.unsqueeze(1)  # (B, 1, d_model) for attention
+        else:
+            # Sequential approach: (B, T, emotion_dim)
+            # For sequential emotion features, we use average pooling to get single representation
+            # This maintains compatibility while preserving temporal information
+            emotion_pooled = emotion_features.mean(dim=1)  # (B, emotion_dim)
+            emotion_encoded = self.emotion_encoder(emotion_pooled)  # (B, d_model)
+            emotion_encoded = emotion_encoded.unsqueeze(1)  # (B, 1, d_model) for attention
+        
         emotion_encoded = self.emotion_norm(emotion_encoded)
         
         # Prepare queries for each stream

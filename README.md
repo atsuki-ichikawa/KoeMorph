@@ -61,43 +61,66 @@ pip install -e .[opensmile]
 
 ### Dataset Preparation
 
-KoeMorph requires synchronized audio and ARKit blendshape data. Organize your data as follows:
+KoeMorph supports two data formats. **v2.0 folder-based format is recommended** for new projects:
+
+#### KoeMorph v2.0 Format (Recommended)
+
+Each recording is organized in a folder with standardized filenames:
+
+```
+data/
+├── processed/
+│   ├── MySlate_001_iPhone_14/
+│   │   ├── audio.wav              # 16kHz audio
+│   │   ├── blendshapes.jsonl      # ARKit blendshapes (30fps or 60fps)
+│   │   ├── metadata.json          # Processing metadata
+│   │   └── timecode.json          # SMPTE timecode sync (optional)
+│   ├── MySlate_002_iPhone_14/
+│   │   ├── audio.wav
+│   │   ├── blendshapes.jsonl
+│   │   ├── metadata.json
+│   │   └── timecode.json
+│   └── ...
+```
+
+**Enhanced JSONL Format (v2.0):**
+```json
+{"frame_index": 0, "timestamp": 0.0000, "timecode": "00:00:00:00", "blendshapes": [0.0, 0.2, 0.8, ...]}
+{"frame_index": 1, "timestamp": 0.0167, "timecode": "00:00:00:01", "blendshapes": [0.1, 0.3, 0.7, ...]}
+{"frame_index": 2, "timestamp": 0.0333, "timecode": "00:00:00:02", "blendshapes": [0.0, 0.1, 0.9, ...]}
+```
+
+**Metadata Format:**
+```json
+{
+  "source_fps": 60.0,
+  "duration_seconds": 15.23,
+  "num_frames": 914,
+  "processing_date": "2024-07-30T21:30:00Z",
+  "source_format": "ARKit_iPhone_14"
+}
+```
+
+#### Legacy Format (v1.0)
+
+Traditional file-pair format for existing datasets:
 
 ```
 data/
 ├── train/
 │   ├── speaker1_001.wav
 │   ├── speaker1_001.jsonl
-│   ├── speaker1_002.wav
-│   ├── speaker1_002.jsonl
 │   └── ...
 ├── val/
-│   ├── speaker2_001.wav
-│   ├── speaker2_001.jsonl
 │   └── ...
 └── test/
-    ├── speaker3_001.wav
-    ├── speaker3_001.jsonl
     └── ...
 ```
 
 **Audio Requirements:**
 - **Format**: 16kHz WAV files, mono preferred
 - **Duration**: Variable length (minimum 8.5 seconds for full context)
-- **Naming**: `{speaker}_{session}.wav`
-
-**ARKit Blendshapes:**
-- **Format**: JSONL with synchronized timestamps at 30 or 60 FPS
-- **Coefficients**: 52 values in [0,1] range
-- **Naming**: Must match corresponding WAV file: `{speaker}_{session}.jsonl`
-- **Frame Rate**: Automatically detected and resampled if needed
-
-**JSONL Format Example:**
-```json
-{"timestamp": 0.0333, "blendshapes": [0.0, 0.2, 0.8, 0.1, ...]}
-{"timestamp": 0.0667, "blendshapes": [0.1, 0.3, 0.7, 0.0, ...]}
-{"timestamp": 0.1000, "blendshapes": [0.0, 0.1, 0.9, 0.2, ...]}
-```
+- **Frame Rate**: 30fps and 60fps both supported with automatic resampling
 
 **Data Collection Methods:**
 - **iOS ARKit**: Use ARKit Face Tracking to record blendshape coefficients
@@ -135,19 +158,21 @@ python scripts/rt.py \
 
 **Sequential Training (Recommended):**
 ```bash
-# Train with dual-stream sequential architecture (default 30fps)
-python src/train_sequential.py
+# Train with v2.0 data format (default OpenSMILE backend)
+PYTHONPATH=/path/to/KoeMorph python src/train_sequential.py data=koemorph_v2
 
-# Train with 60fps data
-python src/train_sequential.py frame_rate=60
+# Train with specific data directory
+PYTHONPATH=/path/to/KoeMorph python src/train_sequential.py \
+  data=koemorph_v2 \
+  data.train_data_dir=/absolute/path/to/your/data/processed
 
-# Train with custom data paths and progressive stride
-python src/train_sequential.py \
-  data.train_data_dir=/absolute/path/to/data/train \
-  data.val_data_dir=/absolute/path/to/data/val \
-  data.stride_mode=progressive \
-  data.initial_stride=32 \
-  data.final_stride=1
+# Train with legacy data format (v1.0)
+PYTHONPATH=/path/to/KoeMorph python src/train_sequential.py
+
+# Train with emotion2vec backend (requires FunASR installation)
+PYTHONPATH=/path/to/KoeMorph python src/train_sequential.py \
+  data=koemorph_v2 \
+  model.emotion_config.backend=emotion2vec
 ```
 
 **Advanced Sequential Training:**
@@ -201,10 +226,10 @@ python src/train_sequential.py \
 
 KoeMorph uses [Hydra](https://hydra.cc) for configuration management. Key config files:
 
-- `configs/dual_stream_config.yaml` - Dual-stream sequential training (recommended)
-- `configs/config.yaml` - Legacy configuration
-- `configs/data/default.yaml` - Data loading settings  
-- `configs/model/dual_stream.yaml` - Dual-stream model architecture
+- `configs/config.yaml` - Main configuration with defaults
+- `configs/data/koemorph_v2.yaml` - **New v2.0 data format (recommended)**
+- `configs/data/default.yaml` - Legacy data loading settings  
+- `configs/model/default.yaml` - Model architecture settings
 - `configs/training/default.yaml` - Training hyperparameters
 
 **Override Examples:**
@@ -283,20 +308,22 @@ KoeMorph/
 ├── src/
 │   ├── data/                          # Data loading and preprocessing
 │   │   ├── io.py                      # ARKit jsonl + wav loading
+│   │   ├── koemorph_dataset.py        # **KoeMorph v2.0 dataset classes**
 │   │   ├── sequential_dataset.py      # Sequential time-series dataset
 │   │   └── adaptive_sequential_dataset.py # Adaptive stride strategies
 │   ├── features/                      # Audio feature extraction  
 │   │   ├── mel_sliding_window.py      # Mel-spectrogram sliding window (256×80, 33.3ms)
-│   │   ├── opensmile_extractor.py     # OpenSMILE eGeMAPS (88D, 300ms)
-│   │   └── emotion_extractor.py       # Unified emotion feature extraction
+│   │   ├── opensmile_extractor.py     # **Enhanced OpenSMILE eGeMAPS with concatenation**
+│   │   └── emotion_extractor.py       # **Enhanced emotion extraction with OpenSMILE backend**
 │   ├── model/                         # Neural network models
-│   │   ├── dual_stream_attention.py   # Dual-stream cross-attention
+│   │   ├── dual_stream_attention.py   # **Enhanced dual-stream cross-attention**
+│   │   ├── sequential_dual_stream_model.py # **Sequential model for full time-series output**
 │   │   ├── simplified_dual_stream_model.py # Complete dual-stream model
 │   │   ├── attention.py               # Legacy cross-attention modules
 │   │   ├── decoder.py                 # Blendshape decoder
 │   │   ├── losses.py                  # Loss functions & metrics
 │   │   └── gaussian_face.py           # Legacy complete model
-│   ├── train_sequential.py            # Sequential training script (recommended)
+│   ├── train_sequential.py            # **Enhanced sequential training script**
 │   └── train.py                       # Legacy training script
 ├── tests/                             # Comprehensive test suite
 ├── configs/                           # Hydra configuration files
@@ -348,49 +375,55 @@ KoeMorph/
 
 ## 🔧 Configuration
 
-Key configuration options in `configs/dual_stream_config.yaml`:
+Key configuration options in `configs/data/koemorph_v2.yaml`:
 
 ```yaml
-model:
-  d_model: 256
-  dual_stream_attention:
-    temperature: 0.5  # Enhanced information balance learning
-    mel_temporal_frames: 3  # Short-term temporal detail frames
-    emotion_dim: 256  # Concatenated + compressed dimension
-    emotion_sequence_length: 1  # Single compressed vector
-  use_temporal_smoothing: true
-  smoothing_alpha: 0.1  # Learnable temporal smoothing
+# KoeMorph v2.0 Data Configuration
+_target_: src.data.koemorph_dataset.KoeMorphDataModule
 
-data:
-  window_frames: 256  # 8.5 seconds context
-  stride_mode: progressive  # dense, sparse, progressive, mixed
-  initial_stride: 32
-  final_stride: 1
-  batch_size: 4  # Smaller for sequential training
+# Data paths (v2.0 folder-based format)
+train_data_dir: "/path/to/koemorph_learning_data/data/processed"
+target_fps: 60  # Auto-detected from metadata, supports 30fps and 60fps
 
-training:
-  max_epochs: 100
-  optimizer:
-    lr: 3e-4  # Lower for stable sequential training
-  loss:
-    mse_weight: 1.0
-    l1_weight: 0.1
-    perceptual_weight: 0.5
-    temporal_weight: 0.2
-    smoothing_weight: 0.1
+# Sequential dataset settings
+sequential:
+  window_frames: 512  # ~8.5 seconds at 60fps
+  stride_frames: 256  # 50% overlap for training
 
-features:
-  mel:
-    context_window: 8.5  # seconds (long-term context)
-    temporal_frames: 3   # short-term detail frames
-    update_interval: 0.0333  # 30 FPS
-    hop_length: 533  # int(16000 / 30)
-  emotion:
-    backend: opensmile  # opensmile or emotion2vec
-    use_concatenation: true  # 3-window concatenation approach
-    window_intervals: [0.0, 0.3, 0.6]  # current, -300ms, -600ms
-    context_window: 20.0  # seconds per window
-    update_interval: 0.3  # 300ms
+# Enhanced emotion configuration
+emotion_config:
+  backend: opensmile  # opensmile (recommended) or emotion2vec
+  use_concatenation: true  # 3-window concatenation approach
+  window_intervals: [0.0, 0.3, 0.6]  # current, -300ms, -600ms
+  context_window: 20.0  # seconds per window
+  update_interval: 0.3  # 300ms update interval
+
+# Training settings
+batch_size: 16  # Adjusted for new data format
+num_workers: 4
+pin_memory: true
+
+# Metadata handling
+metadata:
+  use_timecode: true  # Use SMPTE timecode if available
+  verify_sync: true   # Verify audio-blendshape synchronization
+  auto_detect_fps: true  # Automatically detect source FPS
+```
+
+**Model Configuration (configs/model/default.yaml):**
+```yaml
+# Enhanced dual-stream model
+d_model: 256
+attention:
+  num_heads: 8
+  emotion_dim: 256  # Matches OpenSMILE concatenated output
+  
+# Emotion processing settings (passed to EmotionExtractor)
+emotion_config:
+  backend: opensmile
+  use_concatenation: true
+  context_window: 20.0
+  update_interval: 0.3
 ```
 
 ## 🧪 Testing
@@ -438,16 +471,23 @@ python src/train_sequential.py training.accumulate_grad_batches=4
 
 **Config Override Not Working:**
 ```bash
-# Use absolute paths for data directories
-python src/train_sequential.py data.train_data_dir=/full/path/to/data/train
+# Set PYTHONPATH correctly
+export PYTHONPATH=/path/to/KoeMorph
+python src/train_sequential.py data=koemorph_v2
 
-# Check config file exists
-ls configs/dual_stream_config.yaml
-ls configs/model/dual_stream.yaml
+# Use absolute paths for data directories
+PYTHONPATH=/path/to/KoeMorph python src/train_sequential.py \
+  data=koemorph_v2 \
+  data.train_data_dir=/full/path/to/data/processed
+
+# Check config files exist
+ls configs/data/koemorph_v2.yaml
+ls configs/model/default.yaml
 
 # Verify Hydra syntax (use dots for nested configs)
-python src/train_sequential.py model.dual_stream_attention.temperature=0.05  # ✓ Correct
-python src/train_sequential.py model/dual_stream_attention/temperature=0.05  # ✗ Incorrect
+PYTHONPATH=/path/to/KoeMorph python src/train_sequential.py \
+  data=koemorph_v2 \
+  model.emotion_config.backend=opensmile  # ✓ Correct
 ```
 
 **Audio/Blendshape Synchronization Issues:**

@@ -1,6 +1,6 @@
 # Main configuration file for KoeMorph
 defaults:
-  - data: default
+  - data: default  # Use 'data=koemorph_v2' for new data format
   - model: default
   - training: default
   - _self_
@@ -8,7 +8,7 @@ defaults:
 # Global settings
 seed: 42
 device: auto  # auto, cpu, cuda
-frame_rate: 30  # 30 or 60 fps
+frame_rate: 60  # 30 or 60 fps (default: 60 for new data)
 
 # Logging
 hydra:

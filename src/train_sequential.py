@@ -15,17 +15,18 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 import hydra
 from omegaconf import DictConfig
 
-from model.simplified_dual_stream_model import SimplifiedDualStreamModel
-from data.sequential_dataset import create_sequential_dataloader
-from model.losses import (
-    MultiTaskLoss, 
-    BlendshapeSmoothingLoss,
-    LipSyncConsistencyLoss,
-    create_blendshape_weights
+from src.model.sequential_dual_stream_model import SequentialDualStreamModel
+from src.data.sequential_dataset import create_sequential_dataloader
+from src.data.koemorph_dataset import SequentialKoeMorphDataset
+from src.model.losses import (
+    KoeMorphLoss,
+    PerceptualBlendshapeLoss,
+    LandmarkConsistencyLoss
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ class SequentialTrainer:
     
     def __init__(
         self,
-        model: SimplifiedDualStreamModel,
+        model: SequentialDualStreamModel,
         train_loader: torch.utils.data.DataLoader,
         val_loader: Optional[torch.utils.data.DataLoader] = None,
         device: str = "cuda",
@@ -85,13 +86,8 @@ class SequentialTrainer:
             eta_min=1e-6,
         )
         
-        # Loss functions
-        self.criterion = MultiTaskLoss(
-            mse_weight=1.0,
-            smoothing_weight=0.1,
-            lip_sync_weight=0.2,
-            perceptual_weight=0.0,  # Can add perceptual loss later
-        )
+        # Loss functions (temporary simple MSE for debugging)
+        self.criterion = nn.MSELoss()
         
         # TensorBoard
         if log_dir:
@@ -131,7 +127,19 @@ class SequentialTrainer:
             # Move to device
             audio = batch['audio'].to(self.device)
             target_blendshapes = batch['blendshapes'].to(self.device)
-            file_indices = batch['file_indices']
+            
+            # Handle different batch formats
+            if 'file_indices' in batch:
+                file_indices = batch['file_indices']
+            else:
+                # New KoeMorph dataset format
+                # Add batch dimension if needed
+                if audio.dim() == 1:
+                    audio = audio.unsqueeze(0)
+                if target_blendshapes.dim() == 2:
+                    target_blendshapes = target_blendshapes.unsqueeze(0)
+                # Create dummy file indices
+                file_indices = torch.zeros(audio.shape[0], dtype=torch.long)
             
             # Check if we need to reset temporal state
             if self.current_file_idx is None:
@@ -158,14 +166,11 @@ class SequentialTrainer:
             outputs = self.model(audio, return_attention=False)
             pred_blendshapes = outputs['blendshapes']
             
-            # Compute losses
-            loss_dict = self.criterion(
-                pred_blendshapes,
-                target_blendshapes,
-                return_components=True
-            )
+            # Compute losses (simple MSE for debugging)
+            print(f"DEBUG: pred_blendshapes shape: {pred_blendshapes.shape}")
+            print(f"DEBUG: target_blendshapes shape: {target_blendshapes.shape}")
             
-            total_loss = loss_dict['total']
+            total_loss = self.criterion(pred_blendshapes, target_blendshapes)
             
             # Backward pass
             self.optimizer.zero_grad()
@@ -180,24 +185,21 @@ class SequentialTrainer:
             
             self.optimizer.step()
             
-            # Track losses
-            for key in epoch_losses:
-                epoch_losses[key] += loss_dict[key].item()
+            # Track losses (simplified for debugging)
+            epoch_losses['total'] += total_loss.item()
             num_batches += 1
             
             # Track sequence losses
             self.sequence_losses.append(total_loss.item())
             
-            # Update progress bar
+            # Update progress bar (simplified for debugging)
             pbar.set_postfix({
                 'loss': f"{total_loss.item():.4f}",
-                'mse': f"{loss_dict['mse'].item():.4f}",
-                'smooth': f"{loss_dict['smoothing'].item():.4f}",
             })
             
-            # Log to TensorBoard
+            # Log to TensorBoard (simplified for debugging)
             if self.writer and self.global_step % 10 == 0:
-                self._log_training_step(loss_dict, outputs, batch)
+                self.writer.add_scalar('train/loss', total_loss.item(), self.global_step)
             
             self.global_step += 1
         
@@ -238,8 +240,21 @@ class SequentialTrainer:
                 # Move to device
                 audio = batch['audio'].to(self.device)
                 target_blendshapes = batch['blendshapes'].to(self.device)
-                file_indices = batch['file_indices']
-                file_names = batch['file_names']
+                
+                # Handle different batch formats
+                if 'file_indices' in batch:
+                    file_indices = batch['file_indices']
+                    file_names = batch['file_names']
+                else:
+                    # New KoeMorph dataset format
+                    # Add batch dimension if needed
+                    if audio.dim() == 1:
+                        audio = audio.unsqueeze(0)
+                    if target_blendshapes.dim() == 2:
+                        target_blendshapes = target_blendshapes.unsqueeze(0)
+                    # Create dummy file indices and names
+                    file_indices = torch.zeros(audio.shape[0], dtype=torch.long)
+                    file_names = [batch.get('recording_id', f'recording_{batch_idx}')] * audio.shape[0]
                 
                 # Reset state when switching files
                 for i, file_idx in enumerate(file_indices):
@@ -410,6 +425,72 @@ class SequentialTrainer:
         return stats
 
 
+def create_dataloader(cfg: DictConfig, split: str = "train") -> DataLoader:
+    """
+    Create dataloader based on configuration type.
+    
+    Supports both old sequential dataset and new KoeMorph v2 dataset.
+    """
+    # Check if using new KoeMorph dataset
+    if hasattr(cfg.data, '_target_') and 'koemorph' in cfg.data._target_.lower():
+        logger.info(f"Using new KoeMorph v2 dataset for {split}")
+        
+        # Determine data directory
+        if split == "train":
+            data_dir = cfg.data.train_data_dir
+        elif split == "val":
+            data_dir = cfg.data.val_data_dir
+        else:
+            data_dir = cfg.data.test_data_dir
+            
+        # Create SequentialKoeMorphDataset
+        sequential_config = cfg.data.get('sequential', {})
+        window_frames = sequential_config.get('window_frames', 256)
+        stride_frames = sequential_config.get('stride_frames', 128 if split == "train" else 256)
+        
+        dataset = SequentialKoeMorphDataset(
+            data_dir=data_dir,
+            window_frames=window_frames,
+            stride_frames=stride_frames,
+            sample_rate=cfg.data.sample_rate,
+            target_fps=cfg.data.target_fps,
+            shuffle_files=(split == "train"),
+            loop_dataset=(split == "train"),
+        )
+        
+        # Create DataLoader for IterableDataset
+        return DataLoader(
+            dataset,
+            batch_size=1,  # IterableDataset handles batching
+            num_workers=cfg.data.num_workers,
+            pin_memory=cfg.data.pin_memory,
+        )
+    else:
+        # Use old sequential dataloader
+        logger.info(f"Using old sequential dataset for {split}")
+        
+        if split == "train":
+            return create_sequential_dataloader(
+                data_dir=cfg.data.train_data_dir,
+                batch_size=cfg.data.batch_size,
+                window_frames=cfg.data.get('window_frames', 256),
+                stride_frames=cfg.data.get('stride_frames', 128),
+                num_workers=cfg.data.num_workers,
+                shuffle_files=True,
+                loop_dataset=True,
+            )
+        else:
+            return create_sequential_dataloader(
+                data_dir=cfg.data.val_data_dir,
+                batch_size=cfg.data.batch_size,
+                window_frames=cfg.data.get('window_frames', 256),
+                stride_frames=cfg.data.get('stride_frames', 256),
+                num_workers=cfg.data.num_workers,
+                shuffle_files=False,
+                loop_dataset=False,
+            )
+
+
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig):
     """Main training function."""
@@ -424,47 +505,42 @@ def main(cfg: DictConfig):
     logger.info(f"Using device: {device}")
     
     # Create data loaders
-    logger.info("Creating sequential data loaders...")
+    logger.info("Creating data loaders...")
     
-    train_loader = create_sequential_dataloader(
-        data_dir=cfg.data.train_data_dir,
-        batch_size=cfg.data.batch_size,
-        window_frames=cfg.data.get('window_frames', 256),
-        stride_frames=cfg.data.get('stride_frames', 128),
-        num_workers=cfg.data.num_workers,
-        shuffle_files=True,
-        loop_dataset=True,
-    )
+    train_loader = create_dataloader(cfg, split="train")
     
     val_loader = None
     if cfg.data.val_data_dir:
-        val_loader = create_sequential_dataloader(
-            data_dir=cfg.data.val_data_dir,
-            batch_size=cfg.data.batch_size,
-            window_frames=cfg.data.get('window_frames', 256),
-            stride_frames=cfg.data.get('stride_frames', 256),  # No overlap for validation
-            num_workers=cfg.data.num_workers,
-            shuffle_files=False,
-            loop_dataset=False,
-        )
+        val_loader = create_dataloader(cfg, split="val")
     
     # Create model
     logger.info("Creating dual-stream model...")
     
     # Update model config for sequential training
-    model_config = cfg.model.copy()
+    from omegaconf import OmegaConf
+    model_config = OmegaConf.create(cfg.model)
+    OmegaConf.set_struct(model_config, False)  # Allow dynamic keys
     model_config['real_time_mode'] = False  # Use batch mode for training
     
-    model = SimplifiedDualStreamModel(
-        d_model=model_config.d_model,
-        num_heads=model_config.num_heads,
-        num_blendshapes=model_config.num_blendshapes,
+    # Determine target FPS from data configuration
+    target_fps = cfg.data.get('target_fps', cfg.get('frame_rate', 30))
+    logger.info(f"Using target FPS: {target_fps}")
+    
+    # Get window frames from data configuration
+    sequential_config = cfg.data.get('sequential', {})
+    window_frames = sequential_config.get('window_frames', 256)
+    
+    model = SequentialDualStreamModel(
+        d_model=model_config.get('d_model', 256),
+        num_heads=model_config.attention.get('num_heads', 8),
+        num_blendshapes=52,  # ARKit blendshapes count
         sample_rate=cfg.data.sample_rate,
-        target_fps=cfg.data.target_fps,
-        mel_sequence_length=cfg.data.get('window_frames', 256),
+        target_fps=target_fps,
+        mel_sequence_length=window_frames,
         emotion_config=model_config.get('emotion_config', {}),
-        mel_config=model_config.get('mel_config', {}),
         device=str(device),
+        real_time_mode=model_config.get('real_time_mode', False),
+        stride_frames=window_frames,  # Output full sequence, not sliding windows
     )
     
     # Log model info
@@ -478,10 +554,10 @@ def main(cfg: DictConfig):
         train_loader=train_loader,
         val_loader=val_loader,
         device=str(device),
-        learning_rate=cfg.training.learning_rate,
-        weight_decay=cfg.training.weight_decay,
-        gradient_clip=cfg.training.get('gradient_clip', 1.0),
-        log_dir=Path(cfg.training.log_dir) if cfg.training.get('log_dir') else None,
+        learning_rate=cfg.training.optimizer.get('lr', 1e-4),
+        weight_decay=cfg.training.optimizer.get('weight_decay', 1e-5),
+        gradient_clip=cfg.training.get('gradient_clip_val', 1.0),
+        log_dir=Path("logs") if not cfg.training.get('log_dir') else Path(cfg.training.log_dir),
     )
     
     # Load checkpoint if resuming

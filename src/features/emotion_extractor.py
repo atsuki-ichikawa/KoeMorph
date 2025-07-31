@@ -75,6 +75,7 @@ class EmotionExtractor:
         enable_caching: bool = True,
         batch_size: int = 4,
         sample_rate: int = 16000,
+        **kwargs,  # Accept additional OpenSMILE config parameters
     ):
         """
         Initialize emotion extractor.
@@ -95,6 +96,9 @@ class EmotionExtractor:
         self.enable_caching = enable_caching
         self.batch_size = batch_size
         self.sample_rate = sample_rate
+        
+        # Store additional OpenSMILE config parameters
+        self._init_opensmile_config = kwargs
         
         # Initialize cache directory
         if self.enable_caching:
@@ -180,6 +184,10 @@ class EmotionExtractor:
             
             # Get OpenSMILE config from parent model if available
             opensmile_config = getattr(self, '_opensmile_config', {})
+            
+            # Merge any additional config passed during initialization
+            if hasattr(self, '_init_opensmile_config'):
+                opensmile_config.update(self._init_opensmile_config)
             
             # Create advanced OpenSMILE extractor with sliding window and config
             self.opensmile_extractor = OpenSMILEeGeMAPSExtractor(
